@@ -80,3 +80,34 @@ temp/
 # OS
 Thumbs.db
 .DS_Store
+.iflow/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg/
+.eggs/
+
+# Cache directories
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+# Test results
+test-results/
+build/test-results/
+
+# Frontend (duplicates if in root)
+node_modules/
+package.json
+bun.lock
+
+gha-creds-*.json

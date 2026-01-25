@@ -27,6 +27,8 @@ dependencies = [
     "fastapi>=0.128.0",
     "pytest-asyncio>=1.3.0",
     "psycopg2-binary>=2.9.11",
+    "sqlparse>=0.5.5",
+    "uvicorn>=0.40.0",
 ]
 
 [project.scripts]

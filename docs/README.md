@@ -8,7 +8,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ## Documentation Files
 
-### 1. [system_architecture_flow.md](system_architecture_flow.md)
+### 1. [architecture/system_overview.md](architecture/system_overview.md)
 **Purpose:** Visual representation of the 9-stage ingestion pipeline
 
 **Contents:**
@@ -32,7 +32,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ---
 
-### 2. [data_logic_flow.md](data_logic_flow.md)
+### 2. [architecture/data_flow.md](architecture/data_flow.md)
 **Purpose:** Detailed data transformation through the pipeline
 
 **Contents:**
@@ -55,7 +55,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ---
 
-### 3. [folder_structure.md](folder_structure.md)
+### 3. [development/folder_structure.md](development/folder_structure.md)
 **Purpose:** Complete directory structure and file organization
 
 **Contents:**
@@ -79,7 +79,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ---
 
-### 4. [database_schema.md](database_schema.md)
+### 4. [database/schema.md](database/schema.md)
 **Purpose:** Database schema relationships and table definitions
 
 **Contents:**
@@ -108,7 +108,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ---
 
-### 5. [api_endpoints.md](api_endpoints.md)
+### 5. [api/endpoints.md](api/endpoints.md)
 **Purpose:** Complete API reference for all endpoints
 
 **Contents:**
@@ -140,7 +140,7 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 
 ---
 
-### 6. [configuration_flow.md](configuration_flow.md)
+### 6. [configuration/environment.md](configuration/environment.md)
 **Purpose:** Configuration management and service initialization
 
 **Contents:**
