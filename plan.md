@@ -18,12 +18,15 @@ This document provides a comprehensive research plan for advancing the KBV2 Know
 - Single LLM agent methods are widely used for NER tasks (Amalvy et al., 2023; Bao and Yang, 2024; Bogdanov et al., 2024)
 
 **2. Boundary-Aware NER with LLMs**
-- BANER (COLING 2025) introduces boundary-aware approaches for few-shot NER
+- BANER (COLING 2025) introduces boundary-aware approaches for few-shot NER - https://aclanthology.org/2025.coling-main.691.pdf
+- GPT-NER (NAACL 2025) addresses the sequence-labeling vs. text-generation gap for zero-shot entity recognition
 - Vocabulary expansion strategies with domain-specific tokens (Sachidananda et al., 2021; Zhu et al., 2024)
 - Transformer-based methods dominate modern NER approaches
 
 **3. Knowledge Graph Construction with LLMs**
 - EMNLP 2024 framework for automated KGC from input text
+- GraphMaster (arXiv:2504.00711) - Multi-agent LLM orchestration for KG synthesis with Manager, Perception, Enhancement, and Evaluation agents
+- Generate-on-Graph (EMNLP 2024) - LLM as both agent and knowledge graph for incomplete KG question answering
 - Statistical network analysis approaches for LLM knowledge integration
 - LLM-based frameworks outperform traditional ML/deep learning for recall in most categories
 
@@ -38,6 +41,10 @@ This document provides a comprehensive research plan for advancing the KBV2 Know
 - Springer: https://link.springer.com/article/10.1007/s10462-025-11321-8 (NER Review)
 - ScienceDirect: https://www.sciencedirect.com/science/article/pii/S0968090X25004322 (KG Construction)
 - PMC: https://pmc.ncbi.nlm.nih.gov/articles/PMC12099424/ (LLM Phenotype Classification)
+- ACL Anthology: https://aclanthology.org/2025.coling-main.691.pdf (BANER - COLING 2025)
+- ACL Anthology: https://aclanthology.org/2025.naacl-main.69.pdf (GPT-NER - NAACL 2025)
+- arXiv: https://arxiv.org/abs/2504.00711 (GraphMaster - Multi-Agent KG Synthesis)
+- arXiv: https://arxiv.org/abs/2411.17388 (LLM-as-Judge for KG Quality)
 
 ### 1.2 Multi-Domain Knowledge Management
 
@@ -140,6 +147,8 @@ Managing data across multiple business domains (customers, products, finance, HR
 | 2 | Add domain-aware entity schemas with inheritance | Low | High | Profisee MDM Guide |
 | 3 | Create cross-domain relationship detection | Medium | High | ScienceDirect KG Paper |
 | 4 | Implement federated query routing | Medium | Medium | Kellton MDM Blog |
+| 5 | Implement GraphMaster-style multi-agent entity extraction | High | High | arXiv:2504.00711 |
+| 6 | Add LLM-as-Judge hallucination detection layer | Medium | High | arXiv:2411.17388 |
 
 ### Medium Priority (Phase 2)
 
@@ -149,14 +158,19 @@ Managing data across multiple business domains (customers, products, finance, HR
 | 6 | Add hierarchical entity type taxonomy | Low | Medium | COLING 2025 BANER |
 | 7 | Implement multi-domain metadata management | Medium | High | Stravito Implementation Guide |
 | 8 | Add analytics dashboard for knowledge metrics | Medium | Medium | Transforming KM Systems |
+| 9 | Implement hybrid retrieval (vector + graph) | Medium | High | RAG Integration |
+| 10 | Add Chain-of-Draft prompting variant | Low | Medium | 2025 Token Optimization |
+| 11 | Implement dynamic model routing between providers | Medium | High | Multi-Provider Architecture |
 
 ### Lower Priority (Future Work)
 
 | Priority | Recommendation | Effort | Impact |
 |----------|---------------|--------|--------|
-| 9 | Zero-shot entity linking with knowledge graph augmentation | High | High |
-| 10 | Multi-modal entity extraction (tables, figures) | High | Medium |
-| 11 | Real-time domain discovery and schema evolution | High | Medium |
+| 12 | Zero-shot entity linking with knowledge graph augmentation | High | High |
+| 13 | Multi-modal entity extraction (tables, figures) | High | Medium |
+| 14 | Real-time domain discovery and schema evolution | High | Medium |
+| 15 | Self-consistency verification for critical extractions | Medium | High |
+| 16 | Context graph layer for enterprise decisions | Medium | High |
 
 ---
 
@@ -243,7 +257,215 @@ class EntityTyper:
         return self._score_confidence(typed)
 ```
 
-### 5.2 Multi-Domain Schema System
+### 5.2 Multi-Agent Entity Extraction (GraphMaster-Style)
+
+```python
+# Multi-agent orchestration for complex entity extraction
+class EntityExtractionManager:
+    def __init__(self, llm_client, kg_store):
+        self.manager = ManagerAgent(llm_client)
+        self.perception = PerceptionAgent(llm_client)
+        self.enhancement = EnhancementAgent(llm_client)
+        self.evaluation = EvaluationAgent(llm_client)
+        self.kg_store = kg_store
+
+    async def extract_entities(self, text: str, domain: str) -> ExtractionResult:
+        # Step 1: Manager coordinates the extraction workflow
+        plan = await self.manager.create_plan(text, domain)
+
+        # Step 2: Perception agent extracts initial entities
+        raw_entities = await self.perception.extract(text, domain)
+
+        # Step 3: Enhancement agent refines and links entities
+        enhanced_entities = await self.enhancement.refine(
+            raw_entities, 
+            context=self.kg_store.get_context(domain)
+        )
+
+        # Step 4: Evaluation agent validates quality
+        result = await self.evaluation.validate(enhanced_entities)
+
+        return result
+
+class ManagerAgent:
+    async def create_plan(self, text: str, domain: str) -> ExtractionPlan:
+        prompt = f"""
+        Analyze this text and create an entity extraction plan:
+        Text: {text}
+        Domain: {domain}
+        
+        Return:
+        - Complexity assessment (simple/complex)
+        - Suggested agent coordination strategy
+        - Expected entity types to extract
+        """
+        # Implementation...
+
+class PerceptionAgent:
+    async def extract(self, text: str, domain: str) -> List[EntityCandidate]:
+        # Boundary-aware entity extraction (BANER-style)
+        # Use few-shot prompting with domain-specific examples
+        pass
+
+class EnhancementAgent:
+    async def refine(self, entities: List[EntityCandidate], context: Dict) -> List[Entity]:
+        # Cross-reference with existing KG
+        # Resolve entity linking
+        # Add domain-specific attributes
+        pass
+
+class EvaluationAgent:
+    async def validate(self, entities: List[Entity]) -> ValidationResult:
+        # LLM-as-Judge quality assessment
+        # Hallucination detection
+        # Confidence calibration
+        pass
+```
+
+### 5.3 LLM-as-Judge Hallucination Detection Layer
+
+```python
+# LLM-as-Judge verification for entity quality
+class HallucinationDetector:
+    def __init__(self, judge_llm):
+        self.judge = judge_llm
+
+    async def verify_entity(
+        self,
+        entity: Entity,
+        context: str,
+        source_text: str
+    ) -> VerificationResult:
+        verification_prompt = f"""
+        You are a domain expert verifying entity extraction quality.
+
+        Original Text: {source_text}
+        Context: {context}
+        Extracted Entity: {entity}
+
+        Evaluate the entity for:
+        1. Factual correctness - Is each attribute supported by the text?
+        2. Completeness - Are key attributes missing?
+        3. Consistency - Does the entity match known facts?
+        4. Hallucination - Are there fabricated attributes?
+
+        Return a verification result with:
+        - is_hallucinated: bool
+        - confidence_score: float (0-1)
+        - issues: List[str]
+        - verified_attributes: Dict[str, bool]
+        """
+        # Implementation using structured output
+
+    async def batch_verify(
+        self,
+        entities: List[Entity],
+        context: str,
+        source_text: str
+    ) -> BatchVerificationResult:
+        # Parallel verification for efficiency
+        tasks = [
+            self.verify_entity(e, context, source_text) 
+            for e in entities
+        ]
+        results = await asyncio.gather(*tasks)
+        
+        return BatchVerificationResult(
+            entities=entities,
+            verifications=results,
+            overall_score=avg(r.confidence_score for r in results),
+            hallucinated_entities=[
+                e for e, r in zip(entities, results) 
+                if r.is_hallucinated
+            ]
+        )
+```
+
+### 5.4 Chain-of-Draft Prompting
+
+```python
+# Token-efficient Chain-of-Draft implementation
+class ChainOfDraftTyper:
+    def __init__(self, llm_client):
+        self.llm = llm_client
+
+    async def type_entities_cod(
+        self,
+        text: str,
+        entities: List[EntityCandidate],
+        domain: str
+    ) -> List[TypedEntity]:
+        cod_prompt = f"""
+        Extract entities from this text using Chain-of-Draft:
+
+        Text: {text}
+        Domain: {domain}
+
+        Draft format (concise):
+        1. [ENTITY] -> TYPE (confidence: X%)
+        2. [ENTITY] -> TYPE (confidence: X%)
+        ...
+
+        Rules:
+        - Keep each line to <20 words
+        - Only output entity and type
+        - Skip reasoning steps
+        - Use abbreviations: PER, ORG, LOC, etc.
+        """
+        response = await self.llm.generate(prompt=cod_prompt, max_tokens=500)
+        return self._parse_draft_response(response, entities)
+```
+
+### 5.5 Hybrid Retrieval (Vector + Graph)
+
+```python
+# Hybrid retrieval combining vector similarity with graph traversal
+class HybridEntityRetriever:
+    def __init__(self, vector_store, graph_store):
+        self.vector_store = vector_store  # embeddings for similarity
+        self.graph_store = graph_store    # knowledge graph for relations
+
+    async def retrieve_context(
+        self,
+        query: str,
+        entity_candidates: List[EntityCandidate],
+        domain: str
+    ) -> RetrievalContext:
+        # Step 1: Vector-based similarity search
+        vector_results = await self.vector_store.similarity_search(
+            query=query,
+            k=10,
+            filter={"domain": domain}
+        )
+
+        # Step 2: Graph-based relationship expansion
+        graph_context = await self.graph_store.expand_entities(
+            entities=entity_candidates,
+            hops=2,
+            relation_types=["related_to", "part_of", "located_in"]
+        )
+
+        # Step 3: Combine and rank
+        combined_context = self._merge_results(
+            vector_results=vector_results,
+            graph_context=graph_context,
+            query=query
+        )
+
+        return combined_context
+
+    def _merge_results(
+        self,
+        vector_results: List[SearchResult],
+        graph_context: GraphContext,
+        query: str
+    ) -> RetrievalContext:
+        # Weighted fusion of vector and graph results
+        # Return unified context for entity extraction
+        pass
+```
+
+### 5.6 Multi-Domain Schema System
 
 ```python
 # Domain schema with inheritance
@@ -292,10 +514,12 @@ class FederatedQueryRouter:
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| LLM API costs too high | Medium | High | Caching, batch processing, local LLMs |
-| Entity typing accuracy low | Medium | High | Ensemble with traditional NER, human review |
-| Domain taxonomy too complex | Low | Medium | Start simple, iterate based on data |
+| LLM API costs too high | Medium | High | Caching, batch processing, local LLMs via unified API gateway |
+| Entity typing accuracy low | Medium | High | Ensemble with traditional NER, human review queue |
+| Hallucinations in KG construction | High | High | LLM-as-Judge verification layer, confidence thresholds |
+| Domain taxonomy complexity | Low | Medium | Start simple, iterate based on data |
 | Cross-domain relationships noisy | Medium | Medium | Confidence thresholds, manual review queue |
+| Model API deprecations/breaking changes | Medium | Medium | Abstraction layer, version pinning, fallback providers |
 
 ---
 
@@ -316,6 +540,8 @@ class FederatedQueryRouter:
 - Uptime: > 99.5%
 - Error rate: < 1%
 - User satisfaction: > 4.0/5.0
+- Hallucination rate: < 5% (verified vs. fabricated entity attributes)
+- Model routing accuracy: > 90% (for multi-provider setups)
 
 ---
 
@@ -323,10 +549,13 @@ class FederatedQueryRouter:
 
 ### Academic Papers
 1. "LELA: an LLM-based Entity Linking Approach with Zero-Shot" - arXiv:2601.05192
-2. "BANER: Boundary-Aware LLMs for Few-Shot Named Entity Recognition" - COLING 2025
-3. "Recent Advances in Named Entity Recognition" - arXiv:2401.10825v3
-4. "An LLM-based Framework for Knowledge Graph Construction" - EMNLP 2024
-5. "A review of knowledge graph construction using LLMs" - ScienceDirect
+2. "BANER: Boundary-Aware LLMs for Few-Shot Named Entity Recognition" - COLING 2025 - https://aclanthology.org/2025.coling-main.691.pdf
+3. "GPT-NER: Transforming Named Entity Recognition via Generative Pretraining" - NAACL 2025 - https://aclanthology.org/2025.naacl-main.69.pdf
+4. "Recent Advances in Named Entity Recognition" - arXiv:2401.10825v3
+5. "An LLM-based Framework for Knowledge Graph Construction" - EMNLP 2024
+6. "A review of knowledge graph construction using LLMs" - ScienceDirect
+7. "GraphMaster: Multi-Agent LLM Orchestration for KG Synthesis" - arXiv:2504.00711
+8. "LLM-as-Judge for KG Quality" - arXiv:2411.17388
 
 ### Industry Resources
 1. IBM Prompt Engineering Guide 2026

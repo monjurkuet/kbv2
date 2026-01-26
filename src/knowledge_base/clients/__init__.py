@@ -8,5 +8,12 @@ Knowledge Base API via the Model Context Protocol (MCP) over WebSocket.
 from knowledge_base.clients.websocket_client import KBV2WebSocketClient
 from knowledge_base.clients.progress import ProgressVisualizer
 from knowledge_base.clients.cli import IngestionCLI
+from knowledge_base.clients.llm_client import LLMClient, create_llm_client
 
-__all__ = ["KBV2WebSocketClient", "ProgressVisualizer", "IngestionCLI"]
+__all__ = [
+    "KBV2WebSocketClient",
+    "ProgressVisualizer",
+    "IngestionCLI",
+    "LLMClient",
+    "create_llm_client",
+]
