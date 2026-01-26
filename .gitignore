@@ -105,9 +105,9 @@ logs/*.log
 test-results/
 build/test-results/
 
-# Frontend (duplicates if in root)
-node_modules/
-package.json
-bun.lock
+# Frontend (removed - commented out)
+# node_modules/
+# package.json
+# bun.lock
 
 gha-creds-*.json

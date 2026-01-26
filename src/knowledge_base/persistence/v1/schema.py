@@ -21,56 +21,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY, FLOAT as PG_FLOAT
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.types import UserDefinedType
+from pgvector.sqlalchemy import VECTOR
+
+# Remove Vector class and use VECTOR directly
 
 from datetime import datetime
 from enum import Enum
 from knowledge_base.common.temporal_utils import TemporalType
-
-
-class Vector(UserDefinedType):
-    """Vector type for pgvector."""
-
-    cache_ok = True
-
-    def __init__(self, dimensions=None):
-        """Initialize vector type.
-
-        Args:
-            dimensions: Vector dimensions.
-        """
-        self.dimensions = dimensions
-
-    def get_col_spec(self, **kw):
-        """Get column specification."""
-        if self.dimensions:
-            return f"vector({self.dimensions})"
-        return "vector"
-
-    def bind_processor(self, dialect):
-        """Get bind processor."""
-
-        def process(value):
-            if value is None:
-                return None
-            return f"[{','.join(str(x) for x in value)}]"
-
-        return process
-
-    def result_processor(self, dialect, coltype):
-        """Get result processor."""
-
-        def process(value):
-            if value is None:
-                return None
-            if isinstance(value, str):
-                value = value.strip("[]")
-                if value:
-                    return [float(x) for x in value.split(",")]
-                return []
-            return list(value)
-
-        return process
 
 
 Base = declarative_base()
@@ -192,7 +149,7 @@ class Chunk(Base):
     token_count = Column(Integer, nullable=True)
     chunk_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    embedding = Column(Vector(768), nullable=True)
+    embedding = Column(VECTOR(768), nullable=True)
 
     document = relationship("Document", back_populates="chunks")
     entities = relationship(
@@ -222,7 +179,7 @@ class Entity(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
-    embedding = Column(Vector(768), nullable=True)
+    embedding = Column(VECTOR(768), nullable=True)
     uri = Column(
         String(500), nullable=True, unique=True
     )  # Unique identifier following RDF patterns

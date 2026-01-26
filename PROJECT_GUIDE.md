@@ -18,7 +18,6 @@ This guide provides everything you need to start working on the KBV2 (Knowledge 
 
 ### Architecture Stack
 - **Backend**: Python 3.12+, FastAPI, SQLAlchemy, PostgreSQL + pgvector
-- **Frontend**: TypeScript, SolidJS, Vite, TailwindCSS, Sigma.js (graph visualization)
 - **AI/ML**: Multiple LLM providers (OpenAI, Google), vector embeddings, Leiden clustering
 - **Infrastructure**: Docker-ready, uv package manager, comprehensive testing
 
@@ -48,15 +47,6 @@ kbv2/
 │       ├── resolution_agent.py   # Entity deduplication
 │       ├── clustering_service.py # Hierarchical Leiden clustering
 │       └── synthesis_agent.py    # Map-reduce summarization
-│
-├── frontend/                     # TypeScript/SolidJS frontend
-│   ├── src/                      # Source code
-│   │   ├── api/                  # API client & types (auto-generated)
-│   │   ├── components/           # React components
-│   │   ├── hooks/                # Custom hooks
-│   │   └── stores/               # State management
-│   ├── tests/e2e/                # Playwright end-to-end tests
-│   └── openapi-schema.json       # Auto-generated API schema
 │
 ├── tests/                        # Python test suite
 │   ├── unit/                     # Unit tests
@@ -89,7 +79,6 @@ kbv2/
 
 ### Prerequisites
 - Python 3.12+ with [uv](https://github.com/astral-sh/uv) installed
-- Node.js 18+ with npm
 - PostgreSQL 14+ with pgvector extension
 - Access to LLM APIs (OpenAI, Google, or custom gateway)
 
@@ -115,24 +104,27 @@ uv run knowledge-base
 # WebSocket at: ws://localhost:8000/ws
 ```
 
+<!-- Frontend section removed - frontend no longer exists -->
+<!--
 ### Frontend Setup
 
 ```bash
 cd frontend
 
 # Install dependencies
-npm install
+<command removed - frontend no longer exists>
 
 # Generate API client from OpenAPI schema
-npm run api:generate
+<command removed - frontend no longer exists>
 
 # Run development server
-npm run dev
+<command removed - frontend no longer exists>
 # Available at: http://localhost:3000
 
 # Run e2e tests
-npm run test:e2e
+<command removed - frontend no longer exists>
 ```
+-->
 
 ### Verify Installation
 
@@ -142,24 +134,20 @@ uv run pytest tests/unit/ -v
 
 # Run integration tests
 uv run pytest tests/integration/test_real_world_pipeline.py -v
-
-# Run frontend e2e tests
-cd frontend && npm run test:e2e
 ```
 
 ## 4. Development Workflow
 
-### Starting the Full Stack
+### Starting the Backend
 
 ```bash
-# Terminal 1: Backend
+# Terminal: Backend
 uv run knowledge-base
 
-# Terminal 2: Frontend
-cd frontend && npm run dev
-
-# Terminal 3: API client watch mode (optional)
-cd frontend && npm run api:watch
+# Backend API and WebSocket will be available
+# - API: http://localhost:8000
+# - WebSocket: ws://localhost:8000/ws
+# - API Docs: http://localhost:8000/docs
 ```
 
 ### Common Development Tasks
@@ -168,7 +156,7 @@ cd frontend && npm run api:watch
 
 ```bash
 # Using API endpoint
-curl -X POST http://localhost:8000/api/v1/query/ingest \
+curl -X POST http://localhost:8765/api/v1/query/ingest \
   -H "Content-Type: application/json" \
   -d '{"file_path": "/path/to/document.pdf"}'
 
@@ -181,12 +169,12 @@ curl -X POST http://localhost:8000/api/v1/query/ingest \
 
 ```bash
 # Natural language query
-curl -X POST http://localhost:8000/api/v1/query/text_to_sql \
+curl -X POST http://localhost:8765/api/v1/query/text_to_sql \
   -H "Content-Type: application/json" \
   -d '{"query": "Show me all companies mentioned in Q4 2024 documents"}'
 
 # Vector search entities
-curl -X POST http://localhost:8000/api/v1/query/search_entities \
+curl -X POST http://localhost:8765/api/v1/query/search_entities \
   -H "Content-Type: application/json" \
   -d '{"query": "technology companies"}'
 ```
@@ -195,10 +183,10 @@ curl -X POST http://localhost:8000/api/v1/query/search_entities \
 
 ```bash
 # Get pending reviews
-curl http://localhost:8000/api/v1/review/pending
+curl http://localhost:8765/api/v1/review/pending
 
 # Submit review decision
-curl -X POST http://localhost:8000/api/v1/review/submit \
+curl -X POST http://localhost:8765/api/v1/review/submit \
   -H "Content-Type: application/json" \
   -d '{
     "entity_ids": [1, 2, 3],
@@ -210,9 +198,8 @@ curl -X POST http://localhost:8000/api/v1/review/submit \
 ### Code Changes Workflow
 
 1. **Backend changes**: Edit Python files in `src/knowledge_base/`
-2. **Frontend changes**: Edit TypeScript/SolidJS files in `frontend/src/`
-3. **API changes**: Modify FastAPI endpoints → regenerate OpenAPI schema → regenerate client
-4. **Database changes**: Modify `schema.py` → create migration script → run migration
+2. **API changes**: Modify FastAPI endpoints → regenerate OpenAPI schema → test endpoints
+3. **Database changes**: Modify `schema.py` → create migration script → run migration
 
 ## 5. Testing
 
@@ -236,6 +223,8 @@ uv run pytest tests/unit/test_orchestrator/test_orchestrator.py -v
 uv run pytest -k "test_ingest" -v
 ```
 
+<!-- Frontend Tests section removed - frontend no longer exists -->
+<!--
 ### Frontend Tests
 
 ```bash
@@ -256,13 +245,12 @@ npx playwright test --ui
 # Generate test report
 npx playwright show-report
 ```
+-->
 
 ### Test Data
 
 Test documents are located in:
 - `tests/test_data/` - Backend test documents
-- `frontend/test-data/` - Frontend test documents
-- `frontend/tests/e2e/test-data/` - E2E test fixtures
 
 ### Adding New Tests
 
@@ -281,17 +269,7 @@ async def test_ingest_document(client):
     assert response.json()["status"] == "processing"
 ```
 
-**Frontend e2e test** (`frontend/tests/e2e/ingestion.spec.ts`):
-```typescript
-import { test, expect } from '@playwright/test';
-
-test('document ingestion workflow', async ({ page }) => {
-  await page.goto('/');
-  await page.getByLabel('File Path').fill('/path/to/test.pdf');
-  await page.getByRole('button', { name: 'Ingest' }).click();
-  await expect(page.getByText('Processing complete')).toBeVisible();
-});
-```
+<!-- Frontend test example removed - frontend no longer exists -->
 
 ## 6. Key Commands
 
@@ -325,29 +303,7 @@ uv run python scripts/setup_db.py
 uv run python -i src/knowledge_base/orchestrator.py
 ```
 
-### Frontend Development
-
-```bash
-cd frontend
-
-# Development
-npm run dev              # Start dev server
-npm run build           # Production build
-npm run preview         # Preview production build
-
-# API Client
-npm run api:generate    # Generate from OpenAPI schema
-npm run api:watch       # Watch mode
-
-# Testing
-npm run test:e2e        # Run all e2e tests
-npx playwright test     # Direct playwright command
-npx playwright codegen  # Generate tests interactively
-
-# Code quality
-npm run lint            # (if configured)
-npx prettier --write .  # Format code
-```
+<!-- Frontend Development section removed - frontend no longer exists -->
 
 ### Database
 
@@ -375,7 +331,7 @@ tail -f logs/kbv2.log
 python scripts/final_verification.py
 
 # Generate OpenAPI schema (automatic on startup)
-# Schema saved to: frontend/openapi-schema.json
+# Schema available at: http://localhost:8000/openapi.json
 ```
 
 ## 7. Documentation
@@ -401,8 +357,7 @@ python scripts/final_verification.py
 
 - **Interactive API Docs**: http://localhost:8000/docs (when server is running)
 - **`docs/api/endpoints.md`**: Detailed endpoint documentation
-- **`frontend/openapi-schema.json`**: Machine-readable API schema
-- **`frontend/src/api/types.ts`**: Auto-generated TypeScript types
+- **`http://localhost:8000/openapi.json`**: Machine-readable OpenAPI schema
 
 ### Implementation Plans
 
@@ -485,21 +440,7 @@ HNSW_EF_SEARCH=100
 - Development tools (pytest, ruff, mypy)
 - Entry point definition
 
-**`frontend/package.json`**: Node.js project configuration
-- Dependencies and scripts
-- Vite and TailwindCSS settings
-
-**`frontend/vite.config.ts`**: Build configuration
-- Development server settings
-- Plugin configuration
-
-**`frontend/playwright.config.ts`**: E2E test configuration
-- Test directory and browser settings
-- Base URL and timeout configuration
-
-**`frontend/openapi-ts.config.ts`**: API client generation
-- OpenAPI schema location
-- Output directory and settings
+<!-- Frontend configuration files removed - frontend no longer exists -->
 
 ### Database Configuration
 
@@ -535,7 +476,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 - **General Questions**: Check `docs/README.md` and related documentation
 - **API Issues**: Interactive docs at http://localhost:8000/docs
-- **Frontend Issues**: Check browser console and `logs/kbv2.log`
+<!-- Frontend support removed - frontend no longer exists -->
 - **Database Issues**: Verify PostgreSQL is running and pgvector is installed
 - **LLM Issues**: Check gateway connectivity and API keys
 

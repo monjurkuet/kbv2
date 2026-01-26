@@ -6,8 +6,9 @@ import asyncpg
 from pgvector.asyncpg import register_vector
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import select
 
-from knowledge_base.persistence.v1.schema import Base
+from knowledge_base.persistence.v1.schema import Base, Entity, Chunk
 
 
 class VectorStoreConfig(BaseSettings):
@@ -96,6 +97,16 @@ class VectorStore:
             await register_vector(conn)
 
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+            # Check if embedding column exists and has correct type
+            result = await conn.fetch(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_name = 'chunks' AND column_name = 'embedding'"
+            )
+            if result:
+                print(f"Chunk embedding column type: {result[0]['data_type']}")
+            else:
+                print("Warning: embedding column not found in chunks table")
 
     async def create_entity_embedding_index(self) -> None:
         """Create IVFFlat index for entity embeddings (HNSW limited to 2000 dims)."""
@@ -231,17 +242,12 @@ class VectorStore:
             entity_id: Entity UUID.
             embedding: Embedding vector.
         """
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE entities
-                SET embedding = $1::vector
-                WHERE id = $2
-                """,
-                embedding,
-                entity_id,
-            )
+        async with self._session_factory() as session:
+            result = await session.execute(select(Entity).where(Entity.id == entity_id))
+            entity = result.scalar_one_or_none()
+            if entity:
+                entity.embedding = embedding
+                await session.commit()
 
     async def update_chunk_embedding(
         self,
@@ -254,17 +260,12 @@ class VectorStore:
             chunk_id: Chunk UUID.
             embedding: Embedding vector.
         """
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE chunks
-                SET embedding = $1::vector
-                WHERE id = $2
-                """,
-                embedding,
-                chunk_id,
-            )
+        async with self._session_factory() as session:
+            result = await session.execute(select(Chunk).where(Chunk.id == chunk_id))
+            chunk = result.scalar_one_or_none()
+            if chunk:
+                chunk.embedding = embedding
+                await session.commit()
 
     async def close(self) -> None:
         """Close database connections."""

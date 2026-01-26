@@ -1,7 +1,9 @@
+import json
 import logging
 
 """Ollama Embeddings API client."""
 
+import json
 import logging
 import os
 
@@ -10,8 +12,8 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-
 logger = logging.getLogger(__name__)
+
 
 class EmbeddingConfig(BaseSettings):
     """Embedding configuration."""
@@ -77,12 +79,12 @@ class EmbeddingClient:
         """
         client = await self._get_client()
         all_embeddings: list[list[float]] = []
-        
+
         # Ollama processes one text per request (or batch)
         headers = {
             "Content-Type": "application/json",
         }
-        
+
         for text in texts:
             response = await client.post(
                 f"{self._config.embedding_url}/api/embeddings",
@@ -94,26 +96,32 @@ class EmbeddingClient:
             )
             response.raise_for_status()
             data = response.json()
-            
+
             # Ollama returns embedding directly
             embedding = data.get("embedding", [])
             if not embedding:
                 logger.error(f"No embedding in response: {data}")
                 embedding = []
-            
-            # Ollama returns list[float], which is what pgvector expects
-            # But we need to ensure it's a Python list, not any wrapper
-            if embedding and isinstance(embedding, list):
-                # Convert to list of floats (pgvector expects this)
-                formatted_embedding = [float(x) for x in embedding]
-                all_embeddings.append(formatted_embedding)
+
+            # Return raw float list - pgvector handles conversion automatically
+            if isinstance(embedding, list) and len(embedding) > 0:
+                try:
+                    # Ensure all values are valid floats
+                    float_values = [float(x) for x in embedding]
+                    all_embeddings.append(float_values)
+                    logger.debug(f"Embedding generated: {len(float_values)} dimensions")
+                except Exception as e:
+                    logger.error(f"Failed to process embedding: {e}")
+                    all_embeddings.append([])
             else:
-                logger.warning(f"Invalid embedding format: {type(embedding)}")
-                all_embeddings.append([])  # Empty embedding for failed text
-            
+                logger.warning("No embedding for text")
+                all_embeddings.append([])
+
             # Debug log
             if embedding:
-                logger.info(f"Embedding generated: {len(embedding)} dimensions, type: {type(embedding)}")
+                logger.info(
+                    f"Embedding generated: {len(embedding)} dimensions, type: {type(embedding)}"
+                )
                 if isinstance(embedding, list) and len(embedding) > 0:
                     logger.info(f"  Sample values: {embedding[:3]}")
                 elif isinstance(embedding, str):

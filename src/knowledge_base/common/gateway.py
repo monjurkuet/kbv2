@@ -18,7 +18,7 @@ class GatewayConfig(BaseSettings):
     url: str = "http://localhost:8087/v1/"
     api_key: str = ""
     model: str = "gemini-2.5-flash-lite"
-    temperature: float = 0.7
+    temperature: float = 0.0
     max_tokens: int = 4096
     timeout: float = 120.0
 
@@ -35,7 +35,7 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = Field(..., description="Model name")
     messages: list[ChatMessage] = Field(..., description="List of messages")
-    temperature: float = Field(default=0.7, description="Sampling temperature")
+    temperature: float = Field(default=0.1, description="Sampling temperature")
     max_tokens: int = Field(default=4096, description="Maximum tokens to generate")
     stream: bool = Field(default=False, description="Whether to stream responses")
     response_format: dict[str, str] | None = Field(

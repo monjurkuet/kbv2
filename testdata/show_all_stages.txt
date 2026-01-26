@@ -1,1 +1,0 @@
-DeepMind announced AlphaFold3 for protein structure prediction in their latest research publication.

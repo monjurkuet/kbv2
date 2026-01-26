@@ -372,7 +372,7 @@ async def get_document_spans(
 
     if confidence_threshold > 0:
         entity_query = entity_query.where(
-            ChunkEntity.confidence_score >= confidence_threshold
+            ChunkEntity.confidence >= confidence_threshold
         )
 
     if entity_types:
@@ -479,7 +479,7 @@ async def get_document_entities(
             Entity.properties,
             Entity.created_at,
             func.count(ChunkEntity.id).label("mention_count"),
-            func.max(ChunkEntity.confidence_score).label("max_confidence"),
+            func.max(ChunkEntity.confidence).label("max_confidence"),
         )
         .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
         .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
@@ -494,7 +494,7 @@ async def get_document_entities(
         entity_query = entity_query.where(
             or_(
                 Entity.confidence >= min_confidence,
-                ChunkEntity.confidence_score >= min_confidence,
+                ChunkEntity.confidence >= min_confidence,
             )
         )
 
@@ -555,7 +555,7 @@ async def get_document_entities(
                                     + len(chunk_entity.grounding_quote)
                                 ],
                                 "chunk_index": chunk.chunk_index,
-                                "confidence": chunk_entity.confidence_score or 0.0,
+                                "confidence": chunk_entity.confidence or 0.0,
                                 "grounding_quote": chunk_entity.grounding_quote,
                             }
                         )
@@ -577,7 +577,7 @@ async def get_document_entities(
         document_id=str(document_id),
         entities=entity_responses,
         total=total,
-        domain=document.domain if document else None,
+        domain=None,  # Would need to fetch document info separately
     )
 
     return APIResponse(

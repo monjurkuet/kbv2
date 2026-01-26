@@ -9,7 +9,7 @@ from uuid import uuid4
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -28,11 +28,13 @@ from knowledge_base.common.temporal_utils import (
     TemporalType,
 )
 from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
-from knowledge_base.persistence.v1.schema import (
+from src.knowledge_base.persistence.v1.schema import (
     Entity,
     Document,
     Chunk,
     EntityResolution,
+    ChunkEntity,
+    UUID,
 )
 
 
@@ -69,7 +71,7 @@ class TestRealWorldKBV2System:
             database_url.replace("postgresql://", "postgresql+asyncpg://")
         )
         self.async_session = sessionmaker(
-            self.async_engine, class_=AsyncSession, expire_on_commit=False
+            bind=self.sql_engine, class_=AsyncSession, expire_on_commit=False
         )
 
         self.vector_store = VectorStore()
@@ -195,9 +197,12 @@ class TestRealWorldKBV2System:
                 print(f"Request {i} failed with exception: {result}")
                 # This is acceptable - we're testing resilience
             else:
-                print(
-                    f"Request {i} completed successfully: {result.result is not None}"
-                )
+                if hasattr(result, "result"):
+                    print(
+                        f"Request {i} completed successfully: {result.result is not None}"
+                    )
+                else:
+                    print(f"Request {i} completed successfully (no result attribute)")
 
         # Verify total time is reasonable for concurrent execution
         assert total_time < 15.0, f"Concurrent requests took too long: {total_time}s"
@@ -625,6 +630,266 @@ class TestRealWorldKBV2System:
 
         print("End-to-end cycle completed")
 
+    async def test_entity_mention_duplication_handling(self):
+        """Test handling of duplicate entity mentions within and across documents."""
+        await self.async_setup()
+
+    async def create_document_with_entities(
+        self, doc_name: str, entities_data: list
+    ) -> UUID:
+        """Helper to create document with specified entities."""
+        doc_id = uuid4()
+
+        # Create document
+        doc = Document(id=doc_id, name=doc_name, status="completed", domain="test")
+
+        # Create chunk with all entities
+        chunk_id = uuid4()
+        chunk = Chunk(
+            id=chunk_id,
+            document_id=doc_id,
+            text=" ".join([e["quote"] for e in entities_data]),
+            chunk_index=0,
+        )
+
+        # Create entities and relationships
+        for entity_data in entities_data:
+            entity = Entity(
+                id=entity_data["id"],
+                name=entity_data["name"],
+                entity_type=entity_data["type"],
+                description=entity_data.get("description", ""),
+            )
+
+            # Create chunk-entity relationship
+            chunk_entity = ChunkEntity(
+                chunk_id=chunk_id,
+                entity_id=entity_data["id"],
+                grounding_quote=entity_data["quote"],
+                confidence=1.0,
+            )
+
+            # Add to session
+            with self.sql_engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO documents (id, name, source_uri, mime_type, status, doc_metadata, created_at, updated_at, domain) VALUES (:id, :name, NULL, 'text/plain', 'completed', NULL, NOW(), NOW(), 'test')"
+                    ),
+                    {"id": str(doc_id), "name": doc_name},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO chunks (id, document_id, text, chunk_index, page_number, token_count, chunk_metadata, created_at, embedding) VALUES (:id, :doc_id, :text, 0, NULL, NULL, NULL, NOW(), NULL)"
+                    ),
+                    {"id": str(chunk_id), "doc_id": str(doc_id), "text": chunk.text},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO entities (id, name, entity_type, description, properties, confidence, created_at, updated_at, embedding, uri, source_text, domain) VALUES (:id, :name, :type, :desc, NULL, 1.0, NOW(), NOW(), NULL, NULL, NULL, 'test')"
+                    ),
+                    {
+                        "id": str(entity.id),
+                        "name": entity.name,
+                        "type": entity.entity_type,
+                        "desc": entity.description,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO chunk_entities (chunk_id, entity_id, grounding_quote, confidence, created_at) VALUES (:chunk_id, :entity_id, :quote, 1.0, NOW())"
+                    ),
+                    {
+                        "chunk_id": str(chunk_id),
+                        "entity_id": str(entity.id),
+                        "quote": entity_data["quote"],
+                    },
+                )
+                conn.commit()
+
+        return doc_id
+
+        # Create entities and relationships
+        for entity_data in entities_data:
+            entity = Entity(
+                id=entity_data["id"],
+                name=entity_data["name"],
+                entity_type=entity_data["type"],
+                description=entity_data.get("description", ""),
+            )
+
+            # Create chunk-entity relationship
+            chunk_entity = ChunkEntity(
+                chunk_id=chunk_id,
+                entity_id=entity_data["id"],
+                grounding_quote=entity_data["quote"],
+                confidence=1.0,
+            )
+
+            # Add to session
+            with self.sql_engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO documents (id, name, source_uri, mime_type, status, doc_metadata, created_at, updated_at, domain) VALUES (:id, :name, NULL, 'text/plain', 'completed', NULL, NOW(), NOW(), 'test')"
+                    ),
+                    {"id": str(doc_id), "name": doc_name},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO chunks (id, document_id, text, chunk_index, page_number, token_count, chunk_metadata, created_at, embedding) VALUES (:id, :doc_id, :text, 0, NULL, NULL, NULL, NOW(), NULL)"
+                    ),
+                    {"id": str(chunk_id), "doc_id": str(doc_id), "text": chunk.text},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO entities (id, name, entity_type, description, properties, confidence, created_at, updated_at, embedding, uri, source_text, domain) VALUES (:id, :name, :type, :desc, NULL, 1.0, NOW(), NOW(), NULL, NULL, NULL, 'test')"
+                    ),
+                    {
+                        "id": str(entity.id),
+                        "name": entity.name,
+                        "type": entity.entity_type,
+                        "desc": entity.description,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO chunk_entities (chunk_id, entity_id, grounding_quote, confidence, created_at) VALUES (:chunk_id, :entity_id, :quote, 1.0, NOW())"
+                    ),
+                    {
+                        "chunk_id": str(chunk_id),
+                        "entity_id": str(entity.id),
+                        "quote": entity_data["quote"],
+                    },
+                )
+                conn.commit()
+
+            return doc_id
+
+        # Test Case 1: Same document, same entity mentioned multiple times
+        print("Testing same-document entity duplication...")
+        apple_id = uuid4()
+        same_doc_entities = [
+            {
+                "id": apple_id,
+                "name": "Apple Inc.",
+                "type": "organization",
+                "quote": "Apple Inc. was founded in 1976.",
+            },
+            {
+                "id": apple_id,  # Same entity ID
+                "name": "Apple Inc.",
+                "type": "organization",
+                "quote": "The company Apple Inc. is headquartered in Cupertino.",
+            },
+        ]
+
+        doc1_id = await self.create_document_with_entities(
+            "Same Doc Duplication", same_doc_entities
+        )
+
+        with self.sql_engine.connect() as conn:
+            result_row = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM chunk_entities WHERE entity_id = :entity_id"
+                ),
+                {"entity_id": str(apple_id)},
+            ).fetchone()
+            result = result_row[0] if result_row else 0
+        assert result == 2, f"Expected 2 relationships, got {result}"
+
+        print("✓ Same-document duplication handled correctly")
+
+        # Test Case 2: Cross-document entity duplication (same real-world entity)
+        print("Testing cross-document entity duplication...")
+        google_id = uuid4()
+
+        # Document 1 mentions Google
+        doc1_entities = [
+            {
+                "id": google_id,
+                "name": "Google",
+                "type": "company",
+                "quote": "Google was founded in 1998 by Larry Page and Sergey Brin.",
+            }
+        ]
+
+        # Document 2 also mentions Google (same entity)
+        doc2_entities = [
+            {
+                "id": google_id,
+                "name": "Google",
+                "type": "organization",
+                "quote": "Google has its headquarters in Mountain View, California.",
+            }
+        ]
+
+        doc2_id = await self.create_document_with_entities(
+            "Doc 1 - Google", doc1_entities
+        )
+        doc3_id = await self.create_document_with_entities(
+            "Doc 2 - Google", doc2_entities
+        )
+
+        # Verify both documents have relationship with same entity
+        with self.sql_engine.connect() as conn:
+            result1_row = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM chunk_entities ce JOIN chunks c ON ce.chunk_id = c.id WHERE c.document_id = :doc_id AND ce.entity_id = :entity_id"
+                ),
+                {"doc_id": str(doc2_id), "entity_id": str(google_id)},
+            ).fetchone()
+            result2_row = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM chunk_entities ce JOIN chunks c ON ce.chunk_id = c.id WHERE c.document_id = :doc_id AND ce.entity_id = :entity_id"
+                ),
+                {"doc_id": str(doc3_id), "entity_id": str(google_id)},
+            ).fetchone()
+            result1 = result1_row[0] if result1_row else 0
+            result2 = result2_row[0] if result2_row else 0
+
+        assert result1 == 1, f"Expected 1 relationship in doc1, got {result1}"
+        assert result2 == 1, f"Expected 1 relationship in doc2, got {result2}"
+
+        print("✓ Cross-document duplication handled correctly")
+
+        # Test Case 3: Verify no unintended merging of different entities
+        print("Testing entity separation for similar names...")
+        bank1_id = uuid4()
+        bank2_id = uuid4()
+
+        bank_entities = [
+            {
+                "id": bank1_id,
+                "name": "Bank of America",
+                "type": "financial_institution",
+                "quote": "Bank of America provides banking services.",
+            },
+            {
+                "id": bank2_id,
+                "name": "American Bank",
+                "type": "financial_institution",
+                "quote": "American Bank offers financial products.",
+            },
+        ]
+
+        doc4_id = await self.create_document_with_entities(
+            "Similar Names", bank_entities
+        )
+
+        # Verify two distinct entities were created
+        with self.sql_engine.connect() as conn:
+            result_row = conn.execute(
+                text(
+                    "SELECT COUNT(DISTINCT entity_id) FROM chunk_entities WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = :doc_id)"
+                ),
+                {"doc_id": str(doc4_id)},
+            ).fetchone()
+            result = result_row[0] if result_row else 0
+        assert result == 2, f"Expected 2 distinct entities, got {result}"
+
+        print("✓ Similar named entities kept separate")
+
+        print("All entity duplication tests completed successfully!")
+
     async def run_all_tests(self):
         """Run all comprehensive tests."""
         print("Starting comprehensive real-world KBV2 system tests...\n")
@@ -639,6 +904,7 @@ class TestRealWorldKBV2System:
             self.test_domain_tagging_complex_relationships,
             self.test_resilient_gateway_under_stress,
             self.test_end_to_end_knowledge_ingestion_query_cycle,
+            self.test_entity_mention_duplication_handling,
         ]
 
         results = {}

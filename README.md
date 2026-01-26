@@ -12,6 +12,8 @@ A high-fidelity information extraction engine that transforms unstructured data 
 - **Natural Language Query Interface**: Translate queries to SQL
 - **Domain Tagging & Filtering**: Propagate domain context throughout pipeline
 - **Human Review Queue**: Flag low-confidence resolutions for manual review
+- **LLM-Based Entity Typing**: Advanced entity classification using language models
+- **Multi-Domain Knowledge Management**: Unified data model across business domains
 
 ## Quick Start
 
@@ -27,14 +29,44 @@ cp .env.example .env
 uv run knowledge-base
 ```
 
+## Note on Frontend
+
+The frontend application has been removed from this repository. The system now provides all functionality via a comprehensive backend API. Users can interact with the system through:
+- Interactive API documentation at `http://localhost:8000/docs`
+- Direct API calls to the backend endpoints
+- WebSocket interface for real-time operations
+
 ## Documentation
 
 - **Comprehensive Guide**: [docs/README.md](./docs/README.md)
 - **Architecture Details**: [DESIGN_DOC.md](./DESIGN_DOC.md)
 - **Setup & Deployment**: [docs/OPERATIONS.md](./docs/OPERATIONS.md)
+- **Research & Implementation Plan**: [plan.md](./plan.md)
 
 ## Development
 
 - **Lint**: `uv run ruff check`
 - **Format**: `uv run ruff format`
 - **Type check**: `uv run mypy src/`
+- **Tests**: `uv run pytest tests/`
+
+## Recent Changes
+
+- Added comprehensive research plan for LLM entity typing and multi-domain management
+- Removed temporary test files and cache directories
+- Updated documentation with current implementation status
+- Improved entity typing with domain-aware classification
+
+## Architecture
+
+The system consists of several key components:
+
+1. **Ingestion Pipeline**: Document parsing, chunking, and preprocessing
+2. **Entity Extraction**: LLM-based entity detection and typing
+3. **Graph Management**: Hierarchical clustering and relationship extraction
+4. **Query Engine**: Natural language to SQL translation
+5. **Review System**: Human-in-the-loop quality assurance
+
+## License
+
+MIT

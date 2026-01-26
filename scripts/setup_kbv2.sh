@@ -74,29 +74,30 @@ install_uv() {
     fi
 }
 
-check_bun() {
-    log_info "Checking Bun installation..."
-    if command -v bun &>/dev/null; then
-        BUN_VERSION=$(bun --version)
-        log_success "Bun found (version $BUN_VERSION)"
-        return 0
-    else
-        log_warning "Bun not found"
-        return 1
-    fi
-}
-
-install_bun() {
-    log_info "Installing Bun..."
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-    if command -v bun &>/dev/null; then
-        log_success "Bun installed successfully"
-    else
-        log_error "Bun installation failed"
-    fi
-}
+# Frontend setup functions removed (frontend no longer exists)
+# check_bun() {
+#     log_info "Checking Bun installation..."
+#     if command -v bun &>/dev/null; then
+#         BUN_VERSION=$(bun --version)
+#         log_success "Bun found (version $BUN_VERSION)"
+#         return 0
+#     else
+#         log_warning "Bun not found"
+#         return 1
+#     fi
+# }
+#
+# install_bun() {
+#     log_info "Installing Bun..."
+#     curl -fsSL https://bun.sh/install | bash
+#     export BUN_INSTALL="$HOME/.bun"
+#     export PATH="$BUN_INSTALL/bin:$PATH"
+#     if command -v bun &>/dev/null; then
+#         log_success "Bun installed successfully"
+#     else
+#         log_error "Bun installation failed"
+#     fi
+# }
 
 check_postgres() {
     log_info "Checking PostgreSQL installation..."
@@ -168,58 +169,58 @@ setup_backend() {
     log_success "✓ Backend setup completed"
 }
 
-setup_frontend() {
-    log_info "=== Setting up Frontend ==="
-    
-    # Install bun if not present
-    if ! check_bun; then
-        install_bun
-    fi
-    
-    cd "$PROJECT_ROOT/frontend"
-    
-    log_info "Installing frontend dependencies..."
-    bun install
-    log_success "Frontend dependencies installed"
-    
-    log_info "Generating API client..."
-    if [ -f openapi-schema.json ]; then
-        bun run api:generate
-        log_success "API client generated"
-    else
-        log_warning "openapi-schema.json not found"
-        log_info "API client will be generated when backend starts"
-    fi
-    
-    log_success "✓ Frontend setup completed"
-}
+# Frontend setup removed (frontend no longer exists)
+# setup_frontend() {
+#     log_info "=== Setting up Frontend ==="
+#
+#     # Install bun if not present
+#     if ! check_bun; then
+#         install_bun
+#     fi
+#
+#     cd "$PROJECT_ROOT/frontend"
+#
+#     log_info "Installing frontend dependencies..."
+#     bun install
+#     log_success "Frontend dependencies installed"
+#
+#     log_info "Generating API client..."
+#     if [ -f openapi-schema.json ]; then
+#         bun run api:generate
+#         log_success "API client generated"
+#     else
+#         log_warning "openapi-schema.json not found"
+#         log_info "API client will be generated when backend starts"
+#     fi
+#
+#     log_success "✓ Frontend setup completed"
+# }
 
 show_summary() {
     log_info "\n=== Setup Complete ==="
     log_success "All dependencies installed successfully!"
     log_info "\nNext steps:"
     log_info "1. Edit .env file with your configuration if needed"
-    log_info "2. Start development:"
-    log_info "   ./scripts/dev.sh          # Start both backend and frontend"
+    log_info "2. Start the backend:"
     log_info "   ./scripts/start_backend.sh # Start backend only"
-    log_info "   ./scripts/start_frontend.sh # Start frontend only"
     log_info "\nDefault URLs:"
     log_info "   Backend API: http://localhost:$BACKEND_PORT"
-    log_info "   Frontend:    http://localhost:$FRONTEND_PORT"
     log_info "   API Docs:    http://localhost:$BACKEND_PORT/docs"
+    log_info "\nNote: Frontend has been removed from this project."
+    log_info "      The backend provides all functionality via API endpoints."
 }
 
 main() {
     log_info "KBV2 Setup - Checking system requirements..."
-    
+
     check_python
     check_uv
-    check_bun
+    # check_bun  # Frontend check removed
     check_postgres
-    
+
     setup_backend
-    setup_frontend
-    
+    # setup_frontend  # Frontend setup removed
+
     show_summary
 }
 

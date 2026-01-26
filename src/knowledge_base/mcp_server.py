@@ -5,6 +5,7 @@ Implements Model Context Protocol for external tool integration.
 import asyncio
 import json
 import time
+import logging
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -13,6 +14,8 @@ from knowledge_base.orchestrator import IngestionOrchestrator
 from knowledge_base.text_to_sql_agent import TextToSQLAgent
 from knowledge_base.persistence.v1.vector_store import VectorStore
 from sqlalchemy import create_engine
+
+logger = logging.getLogger(__name__)
 
 
 class MCPRequest(BaseModel):
