@@ -7,6 +7,7 @@ extraction, and knowledge graph construction.
 
 from knowledge_base.orchestrator import IngestionOrchestrator
 
+
 def main() -> None:
     """Entry point for the Knowledge Base CLI.
 
@@ -23,8 +24,9 @@ def main() -> None:
     uvicorn.run(
         "knowledge_base.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8765,
         reload=True,
     )
+
 
 __all__ = ["IngestionOrchestrator", "main"]

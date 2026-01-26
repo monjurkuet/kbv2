@@ -215,14 +215,16 @@ async def get_document(
         if hasattr(document.status, "value")
         else str(document.status),
         domain=document.domain,
-        metadata=document.metadata or {},
+        metadata=document.doc_metadata or {},
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_count=chunk_count,
         entity_count=entity_count or 0,
-        processing_time_ms=document.metadata.get("processing_time_ms")
-        if document.metadata
-        else None,
+        processing_time_ms=(
+            document.doc_metadata.get("processing_time_ms")
+            if document.doc_metadata
+            else None
+        ),
     )
 
     return APIResponse(

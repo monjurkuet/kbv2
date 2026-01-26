@@ -15,7 +15,7 @@ class GatewayConfig(BaseSettings):
         env_prefix="LLM_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    url: str = "http://localhost:8317/v1/"
+    url: str = "http://localhost:8087/v1/"
     api_key: str = ""
     model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.7

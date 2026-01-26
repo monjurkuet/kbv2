@@ -6,15 +6,10 @@ export default defineConfig({
     path: 'src/api',
     format: 'prettier'
   },
+  client: '@hey-api/client-fetch',
   plugins: [
-    {
-      name: '@hey-api/typescript',
-      config: {
-        enums: 'typescript',
-        dates: true,
-        name: 'ApiTypes'
-      }
-    }
+    '@hey-api/typescript',
+    '@hey-api/sdk'
   ]
 });
 

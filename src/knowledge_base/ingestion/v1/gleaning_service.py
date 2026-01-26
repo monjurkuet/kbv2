@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_base.common.gateway import GatewayClient
+import time
 from knowledge_base.common.temporal_utils import (
     TemporalClaim,
     TemporalNormalizer,
@@ -157,6 +158,10 @@ class GleaningService:
         if pass_num > self._config.max_passes:
             return False, "max_passes_reached"
 
+        # Check if this is actually an LLM failure
+        if result.information_density < 0:
+            return False, "llm_failure"
+        
         # Check information density of the most recent result
         if result.information_density < self._config.min_density_threshold:
             return False, "low_information_density"
@@ -265,10 +270,16 @@ class GleaningService:
         Returns:
             Complete extraction result.
         """
+        logger.info(f"🔍 EXTRACT: Starting extraction for text length {len(text)}")
+        logger.info(f"🔍 EXTRACT: Text preview: {text[:100]}...")
+        
         results: list[ExtractionResult] = []
 
         # Pass 1 always runs
+        logger.info(f"🔍 EXTRACT: Starting Pass 1")
         pass_result = await self._extract_pass(text, 1, context, [])
+        logger.info(f"🔍 EXTRACT: Pass 1 complete - entities: {len(pass_result.entities)}, edges: {len(pass_result.edges)}")
+        logger.info(f"🔍 EXTRACT: Pass 1 info density: {pass_result.information_density}")
         results.append(pass_result)
 
         # Only run pass 2 if pass 1 indicates sufficient information density
@@ -292,6 +303,10 @@ class GleaningService:
         context: str | None,
         previous_results: list[ExtractionResult],
     ) -> ExtractionResult:
+        logger.info(f"🔍 PASS {pass_num}: Starting extraction pass")
+        logger.info(f"🔍 PASS {pass_num}: Text length: {len(text)}")
+        if context:
+            logger.info(f"🔍 PASS {pass_num}: Context provided: {context[:50]}...")
         """Perform single extraction pass.
 
         Args:

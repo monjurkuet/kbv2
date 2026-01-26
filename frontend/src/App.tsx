@@ -72,7 +72,7 @@ const AppLayout = (props: { children: any, title: string, subtitle: string }) =>
     <footer class="bg-gray-100 border-t border-gray-200 px-4 py-2 text-xs text-gray-500 text-center">
       <div class="flex justify-between items-center">
         <span>KBV2 Knowledge Engine v1.0.0</span>
-        <span>Backend: http://localhost:8000</span>
+        <span>Backend: http://localhost:8765</span>
       </div>
     </footer>
   </div>
@@ -97,7 +97,7 @@ const GraphRoute = () => {
   const graphStore = createGraphStore();
   return (
     <AppLayout title="KBV2 Knowledge Explorer" subtitle="Phase 2: Knowledge Explorer">
-      <div data-testid="graph-container">
+      <div data-testid="graph-container" class="flex-1 w-full h-full">
         <GraphCanvas graphStore={graphStore} graphId={graphId} />
       </div>
     </AppLayout>
@@ -142,7 +142,7 @@ const App = () => {
         const graphStore = createGraphStore();
         return (
           <AppLayout title="KBV2 Knowledge Explorer" subtitle="Phase 2: Knowledge Explorer">
-            <div data-testid="graph-container">
+            <div data-testid="graph-container" class="flex-1 w-full h-full">
               <GraphCanvas graphStore={graphStore} graphId="00000000-0000-0000-0000-000000000000" />
             </div>
           </AppLayout>
@@ -150,7 +150,7 @@ const App = () => {
       }} />
       <Route path="/graph/:graphId" component={GraphRoute} />
       <Route path="/control-tower" component={() => {
-        const ingestionStore = createIngestionStore();
+        const { ingestionStore } = createIngestionStore();
         return (
           <AppLayout title="KBV2 Knowledge Explorer" subtitle="Phase 4: Control Tower">
             <div data-testid="control-tower-container">
@@ -160,7 +160,7 @@ const App = () => {
         );
       }} />
       <Route path="/ingestion" component={() => {
-        const ingestionStore = createIngestionStore();
+        const { ingestionStore } = createIngestionStore();
         return (
           <AppLayout title="KBV2 Knowledge Explorer" subtitle="Phase 4: Control Tower">
             <div data-testid="control-tower-container">

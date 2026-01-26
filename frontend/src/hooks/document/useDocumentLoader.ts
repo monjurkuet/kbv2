@@ -1,5 +1,5 @@
 import { createSignal, createResource, createEffect } from 'solid-js';
-import { apiClient } from '../../api/custom-client';
+import { getDocumentContentApiV1DocumentsDocumentIdContentGet, getDocumentSpansApiV1DocumentsDocumentIdSpansGet, getDocumentEntitiesApiV1DocumentsDocumentIdEntitiesGet } from '../../api/sdk.gen';
 
 interface UseDocumentLoaderProps {
   documentStore: any;
@@ -21,15 +21,15 @@ export function useDocumentLoader({ documentStore }: UseDocumentLoaderProps): Do
     documentStore.clearError();
 
     try {
-      const contentResponse = await apiClient.GET('/api/v1/documents/{document_id}/content', {
+      const contentResponse = await getDocumentContentApiV1DocumentsDocumentIdContentGet({
         params: {
           path: { document_id: documentId },
           query: { format: 'json' }
         }
       });
 
-      if (contentResponse) {
-        documentStore.setDocument(documentId, contentResponse);
+      if (contentResponse.data) {
+        documentStore.setDocument(documentId, contentResponse.data);
       } else {
         throw new Error('Failed to load document');
       }
@@ -49,7 +49,7 @@ export function useDocumentLoader({ documentStore }: UseDocumentLoaderProps): Do
     documentStore.setLoading(true);
 
     try {
-      const response = await apiClient.GET('/api/v1/documents/{document_id}/spans', {
+      const response = await getDocumentSpansApiV1DocumentsDocumentIdSpansGet({
         params: {
           path: { document_id: documentId },
           query: {
@@ -59,8 +59,8 @@ export function useDocumentLoader({ documentStore }: UseDocumentLoaderProps): Do
         }
       });
 
-      if (response && 'spans' in response) {
-        documentStore.setTextSpans(response.spans || []);
+      if (response.data && 'spans' in response.data) {
+        documentStore.setTextSpans(response.data.spans || []);
       }
 
       setLoading(false);
@@ -76,7 +76,7 @@ export function useDocumentLoader({ documentStore }: UseDocumentLoaderProps): Do
     documentStore.setLoading(true);
 
     try {
-      const response = await apiClient.GET('/api/v1/documents/{document_id}/entities', {
+      const response = await getDocumentEntitiesApiV1DocumentsDocumentIdEntitiesGet({
         params: {
           path: { document_id: documentId },
           query: {
@@ -88,8 +88,8 @@ export function useDocumentLoader({ documentStore }: UseDocumentLoaderProps): Do
         }
       });
 
-      if (response && 'entities' in response) {
-        documentStore.setEntities(response.entities || []);
+      if (response.data && 'entities' in response.data) {
+        documentStore.setEntities(response.data.entities || []);
       }
 
       setLoading(false);

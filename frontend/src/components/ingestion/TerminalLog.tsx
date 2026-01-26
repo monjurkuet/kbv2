@@ -11,7 +11,7 @@ const TerminalLog = (props: TerminalLogProps) => {
   const [scrollTarget, setScrollTarget] = createSignal<HTMLElement | null>(null);
 
   createEffect(() => {
-    if (logContainerRef && ingestionStore.logs.length > 0) {
+    if (logContainerRef && ingestionStore.logs && ingestionStore.logs.length > 0) {
       logContainerRef.scrollTop = logContainerRef.scrollHeight;
     }
   });
@@ -26,7 +26,7 @@ const TerminalLog = (props: TerminalLogProps) => {
   };
 
   return (
-    <div class="flex-1 flex flex-col min-h-0">
+    <div class="flex-1 flex flex-col min-h-0 TerminalLog">
       <div class="flex items-center justify-between p-3 bg-gray-800 border-b border-gray-700">
         <h3 class="text-sm font-semibold text-gray-300">Ingestion Log</h3>
         <div class="flex items-center space-x-2">
@@ -66,7 +66,7 @@ const TerminalLog = (props: TerminalLogProps) => {
           )}
         </For>
 
-        <Show when={ingestionStore.logs.length === 0}>
+        <Show when={!ingestionStore.logs || ingestionStore.logs.length === 0}>
           <div class="text-gray-500 italic">No logs yet. Start an ingestion to see logs here.</div>
         </Show>
       </div>

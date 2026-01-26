@@ -6,9 +6,783 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Check",
+        "description": "Health check endpoint for monitoring and load balancers.\n\nReturns:\n    Basic service health information",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness Check",
+        "description": "Readiness check endpoint for Kubernetes deployments.\n\nReturns:\n    Service readiness status",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/query/translate": {
+      "post": {
+        "tags": [
+          "query",
+          "query"
+        ],
+        "summary": "Translate Query",
+        "description": "Translate natural language query to SQL without executing it.\n\nArgs:\n    nl_query: Natural language query string.\n    agent: TextToSQLAgent instance (injected by dependency).\n\nReturns:\n    Dictionary containing:\n        - sql: The generated SQL statement\n        - warnings: List of validation warnings\n        - error: Error message (if any)",
+        "operationId": "translate_query_api_v1_query_translate_post",
+        "parameters": [
+          {
+            "name": "nl_query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Nl Query"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Translate Query Api V1 Query Translate Post"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/query/execute": {
+      "post": {
+        "tags": [
+          "query",
+          "query"
+        ],
+        "summary": "Execute Query",
+        "description": "Translate and execute natural language query.\n\nArgs:\n    nl_query: Natural language query string.\n    agent: TextToSQLAgent instance (injected by dependency).\n\nReturns:\n    Dictionary containing:\n        - sql: The generated SQL statement\n        - results: Query results (if successful)\n        - warnings: List of validation warnings\n        - error: Error message (if any)",
+        "operationId": "execute_query_api_v1_query_execute_post",
+        "parameters": [
+          {
+            "name": "nl_query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Nl Query"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Execute Query Api V1 Query Execute Post"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/query/schema": {
+      "get": {
+        "tags": [
+          "query",
+          "query"
+        ],
+        "summary": "Get Schema",
+        "description": "Get database schema information.\n\nArgs:\n    agent: TextToSQLAgent instance (injected by dependency).\n\nReturns:\n    Dictionary containing table names and their columns with data types.",
+        "operationId": "get_schema_api_v1_query_schema_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Schema Api V1 Query Schema Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/v1/review/pending": {
+      "get": {
+        "tags": [
+          "review",
+          "review"
+        ],
+        "summary": "Get Pending Reviews",
+        "description": "Get pending reviews ordered by priority.\n\nArgs:\n    limit: Maximum number of reviews to return (default: 50)\n    offset: Number of reviews to skip (default: 0)\n    db: Database session dependency\n\nReturns:\n    List of pending review items",
+        "operationId": "get_pending_reviews_api_v1_review_pending_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewItem"
+                  },
+                  "title": "Response Get Pending Reviews Api V1 Review Pending Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/review/{review_id}": {
+      "get": {
+        "tags": [
+          "review",
+          "review"
+        ],
+        "summary": "Get Review",
+        "description": "Get a specific review by ID.\n\nArgs:\n    review_id: ID of the review to retrieve\n    db: Database session dependency\n\nReturns:\n    Review item\n\nRaises:\n    HTTPException: If review not found",
+        "operationId": "get_review_api_v1_review__review_id__get",
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/review/{review_id}/approve": {
+      "post": {
+        "tags": [
+          "review",
+          "review"
+        ],
+        "summary": "Approve Review",
+        "description": "Approve a review.\n\nArgs:\n    review_id: ID of the review to approve\n    approval: Approval data including optional reviewer notes\n    db: Database session dependency\n\nReturns:\n    True if review was approved\n\nRaises:\n    HTTPException: If review not found",
+        "operationId": "approve_review_api_v1_review__review_id__approve_post",
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewApproval"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "title": "Response Approve Review Api V1 Review  Review Id  Approve Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/review/{review_id}/reject": {
+      "post": {
+        "tags": [
+          "review",
+          "review"
+        ],
+        "summary": "Reject Review",
+        "description": "Reject a review with corrections.\n\nArgs:\n    review_id: ID of the review to reject\n    rejection: Rejection data including corrections and optional reviewer notes\n    db: Database session dependency\n\nReturns:\n    True if review was rejected and corrections applied\n\nRaises:\n    HTTPException: If review not found",
+        "operationId": "reject_review_api_v1_review__review_id__reject_post",
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRejection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "title": "Response Reject Review Api V1 Review  Review Id  Reject Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graphs/{graph_id}:summary": {
+      "get": {
+        "tags": [
+          "graphs",
+          "graph"
+        ],
+        "summary": "Get Graph Summary",
+        "description": "GET /api/v1/graphs/{graph_id}:summary\n\nReturns community-level graph overview for Sigma.js initial view.\nUses Map-Reduce style aggregation to efficiently calculate inter-community edges.\n\nAIP-136 Custom Method pattern for operations that don't fit standard CRUD.",
+        "operationId": "get_graph_summary_api_v1_graphs__graph_id__summary_get",
+        "parameters": [
+          {
+            "name": "graph_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Graph ID",
+              "title": "Graph Id"
+            },
+            "description": "Graph ID"
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5,
+              "minimum": 0,
+              "description": "Community hierarchy level",
+              "default": 0,
+              "title": "Level"
+            },
+            "description": "Community hierarchy level"
+          },
+          {
+            "name": "min_community_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Minimum entities per community",
+              "default": 3,
+              "title": "Min Community Size"
+            },
+            "description": "Minimum entities per community"
+          },
+          {
+            "name": "include_metrics",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include centrality metrics",
+              "default": false,
+              "title": "Include Metrics"
+            },
+            "description": "Include centrality metrics"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by domain",
+              "title": "Domain"
+            },
+            "description": "Filter by domain"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_GraphSummaryResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graphs/{graph_id}/nodes/{node_id}:neighborhood": {
+      "get": {
+        "tags": [
+          "graphs",
+          "graph"
+        ],
+        "summary": "Get Neighborhood",
+        "description": "GET /api/v1/graphs/{graph_id}/nodes/{node_id}:neighborhood\n\nExpand entity neighborhood for Sigma.js drill-down interactions.\nReturns immediate neighbors and connecting edges with confidence filtering.\n\nAIP-136 Custom Method pattern for complex graph operations.",
+        "operationId": "get_neighborhood_api_v1_graphs__graph_id__nodes__node_id__neighborhood_get",
+        "parameters": [
+          {
+            "name": "graph_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Graph ID",
+              "title": "Graph Id"
+            },
+            "description": "Graph ID"
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Center node ID",
+              "title": "Node Id"
+            },
+            "description": "Center node ID"
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 3,
+              "minimum": 1,
+              "description": "Traversal depth",
+              "default": 1,
+              "title": "Depth"
+            },
+            "description": "Traversal depth"
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(outgoing|incoming|bidirectional)$",
+              "description": "Edge direction to follow",
+              "default": "bidirectional",
+              "title": "Direction"
+            },
+            "description": "Edge direction to follow"
+          },
+          {
+            "name": "min_confidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "description": "Minimum confidence",
+              "default": 0.7,
+              "title": "Min Confidence"
+            },
+            "description": "Minimum confidence"
+          },
+          {
+            "name": "max_nodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "description": "Maximum nodes to return",
+              "default": 1000,
+              "title": "Max Nodes"
+            },
+            "description": "Maximum nodes to return"
+          },
+          {
+            "name": "node_types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by entity types",
+              "title": "Node Types"
+            },
+            "description": "Filter by entity types"
+          },
+          {
+            "name": "edge_types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by edge types",
+              "title": "Edge Types"
+            },
+            "description": "Filter by edge types"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_NeighborhoodResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graphs/{graph_id}:findPath": {
+      "post": {
+        "tags": [
+          "graphs",
+          "graph"
+        ],
+        "summary": "Find Path",
+        "description": "POST /api/v1/graphs/{graph_id}:findPath\n\nFind paths between two nodes using various algorithms.\nServer-side path finding avoids moving large datasets to client.\n\nAIP-136 Custom Method for complex graph analytics.",
+        "operationId": "find_path_api_v1_graphs__graph_id__findPath_post",
+        "parameters": [
+          {
+            "name": "graph_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Graph ID",
+              "title": "Graph Id"
+            },
+            "description": "Graph ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PathFindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_PathResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graphs/{graph_id}:export": {
+      "get": {
+        "tags": [
+          "graphs",
+          "graph"
+        ],
+        "summary": "Export Graph",
+        "description": "GET /api/v1/graphs/{graph_id}:export\n\nExport graph in Graphology JSON format for Sigma.js compatibility.\nCan include pre-calculated layout coordinates for large graphs.\n\nAIP-136 Custom Method for data export operations.",
+        "operationId": "export_graph_api_v1_graphs__graph_id__export_get",
+        "parameters": [
+          {
+            "name": "graph_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Graph ID",
+              "title": "Graph Id"
+            },
+            "description": "Graph ID"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(graphology|gexf|graphml)$",
+              "default": "graphology",
+              "title": "Format"
+            }
+          },
+          {
+            "name": "include_layout",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include pre-calculated layout coordinates",
+              "default": false,
+              "title": "Include Layout"
+            },
+            "description": "Include pre-calculated layout coordinates"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_GraphologyExport_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/documents/{document_id}": {
       "get": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Get Document",
@@ -55,6 +829,7 @@
     "/api/v1/documents/{document_id}/content": {
       "get": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Get Document Content",
@@ -114,6 +889,7 @@
     "/api/v1/documents/{document_id}/spans": {
       "get": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Get Document Spans",
@@ -207,6 +983,7 @@
     "/api/v1/documents/{document_id}/entities": {
       "get": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Get Document Entities",
@@ -323,6 +1100,7 @@
     "/api/v1/documents/:search": {
       "post": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Search Documents",
@@ -365,6 +1143,7 @@
     "/api/v1/documents/{document_id}/annotations": {
       "post": {
         "tags": [
+          "documents",
           "documents"
         ],
         "summary": "Create Annotation",
@@ -418,26 +1197,11 @@
         }
       }
     },
-    "/health": {
+    "/api/v1/openapi": {
       "get": {
-        "summary": "Health Check",
-        "operationId": "health_check_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ready": {
-      "get": {
-        "summary": "Readiness Check",
-        "operationId": "readiness_check_ready_get",
+        "summary": "Get Openapi",
+        "description": "Alternative OpenAPI endpoint for better client generation.\n\nReturns:\n    Complete OpenAPI specification",
+        "operationId": "get_openapi_api_v1_openapi_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -732,6 +1496,202 @@
           "success"
         ],
         "title": "APIResponse[DocumentSpansResponse]"
+      },
+      "APIResponse_GraphSummaryResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Indicates if request succeeded"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/APIError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error details on failure"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Additional metadata (pagination, timing, request_id)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "APIResponse[GraphSummaryResponse]"
+      },
+      "APIResponse_GraphologyExport_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Indicates if request succeeded"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphologyExport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/APIError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error details on failure"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Additional metadata (pagination, timing, request_id)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "APIResponse[GraphologyExport]"
+      },
+      "APIResponse_NeighborhoodResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Indicates if request succeeded"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NeighborhoodResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/APIError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error details on failure"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Additional metadata (pagination, timing, request_id)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "APIResponse[NeighborhoodResponse]"
+      },
+      "APIResponse_PathResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Indicates if request succeeded"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PathResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/APIError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error details on failure"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Additional metadata (pagination, timing, request_id)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "APIResponse[PathResponse]"
       },
       "APIResponse_W3CAnnotation_": {
         "properties": {
@@ -1235,6 +2195,150 @@
         "title": "ErrorInfo",
         "description": "Detailed error information following google.rpc.ErrorInfo pattern."
       },
+      "GraphEdge": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Unique edge identifier (UUID)"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source node key"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target node key"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes",
+            "description": "Edge attributes: label, weight, type, confidence, color"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "source",
+          "target"
+        ],
+        "title": "GraphEdge",
+        "description": "Sigma.js compatible edge representation."
+      },
+      "GraphNode": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Unique node identifier (UUID)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Display label for the node"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes",
+            "description": "Node attributes: x, y, size, color, community, entity_type, etc."
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "GraphNode",
+        "description": "Sigma.js compatible node representation."
+      },
+      "GraphSummaryResponse": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "description": "Community nodes (level 0)"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "description": "Aggregated inter-community edges"
+          },
+          "total_nodes": {
+            "type": "integer",
+            "title": "Total Nodes",
+            "description": "Total number of nodes"
+          },
+          "total_edges": {
+            "type": "integer",
+            "title": "Total Edges",
+            "description": "Total number of edges"
+          },
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats",
+            "description": "Graph statistics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges",
+          "total_nodes",
+          "total_edges"
+        ],
+        "title": "GraphSummaryResponse",
+        "description": "Response for community-level graph summary view."
+      },
+      "GraphologyExport": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes",
+            "description": "Graph-level attributes (name, description, etc.)"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options",
+            "description": "Graph options for Sigma.js"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "description": "All nodes in graph"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "description": "All edges in graph"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "GraphologyExport",
+        "description": "Graphology JSON format for Sigma.js compatibility."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1247,6 +2351,380 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "name"
+        ],
+        "title": "HealthResponse",
+        "description": "Health check response model."
+      },
+      "NeighborhoodResponse": {
+        "properties": {
+          "center_node": {
+            "$ref": "#/components/schemas/GraphNode",
+            "description": "Center entity node"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "description": "Neighbor nodes including center"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "description": "Edges connecting neighbors"
+          },
+          "expanded_count": {
+            "type": "integer",
+            "title": "Expanded Count",
+            "description": "Number of new nodes added"
+          },
+          "max_confidence": {
+            "type": "number",
+            "title": "Max Confidence",
+            "description": "Maximum edge confidence in result"
+          },
+          "min_confidence": {
+            "type": "number",
+            "title": "Min Confidence",
+            "description": "Minimum edge confidence in result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "center_node",
+          "nodes",
+          "edges",
+          "expanded_count",
+          "max_confidence",
+          "min_confidence"
+        ],
+        "title": "NeighborhoodResponse",
+        "description": "Response for entity neighborhood expansion."
+      },
+      "PathFindingRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source node ID (graphs/{graph}/nodes/{node})"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target node ID"
+          },
+          "algorithm": {
+            "type": "string",
+            "pattern": "^(shortest_path|all_simple_paths|most_confident)$",
+            "title": "Algorithm",
+            "description": "Path finding algorithm to use",
+            "default": "shortest_path"
+          },
+          "max_hops": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Hops",
+            "description": "Maximum number of hops allowed in path",
+            "default": 5
+          },
+          "min_confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Confidence",
+            "description": "Minimum confidence threshold for edges",
+            "default": 0.7
+          },
+          "edge_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge Types",
+            "description": "Optional filter for specific edge types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "PathFindingRequest",
+        "description": "Request model for graph path finding operations."
+      },
+      "PathResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source node"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target node"
+          },
+          "paths": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Paths",
+            "description": "List of paths (each path is list of node IDs)"
+          },
+          "confidence_scores": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Confidence Scores",
+            "description": "Confidence score for each path"
+          },
+          "total_paths": {
+            "type": "integer",
+            "title": "Total Paths",
+            "description": "Total number of paths found"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "description": "Algorithm used"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target",
+          "paths",
+          "confidence_scores",
+          "total_paths",
+          "algorithm"
+        ],
+        "title": "PathResponse",
+        "description": "Response for path finding operations."
+      },
+      "ReviewApproval": {
+        "properties": {
+          "reviewer_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Notes"
+          }
+        },
+        "type": "object",
+        "title": "ReviewApproval",
+        "description": "Pydantic model for approving a review."
+      },
+      "ReviewItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "edge_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge Id"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "merged_entity_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Entity Ids"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Score"
+          },
+          "grounding_quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grounding Quote"
+          },
+          "source_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Text"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "item_type",
+          "status",
+          "priority",
+          "created_at"
+        ],
+        "title": "ReviewItem",
+        "description": "Pydantic model for review queue items."
+      },
+      "ReviewRejection": {
+        "properties": {
+          "corrections": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Corrections"
+          },
+          "reviewer_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "corrections"
+        ],
+        "title": "ReviewRejection",
+        "description": "Pydantic model for rejecting a review with corrections."
       },
       "SearchResult": {
         "properties": {

@@ -15,9 +15,9 @@ test.describe('Phase 4: Control Tower (WebSocket MCP)', () => {
   });
 
   test('Connection status indicator is visible', async ({ page }) => {
-    const connectionStatus = page.locator('[class*="bg-"][class*="text-"][class*="border-"]');
+    const connectionStatus = page.locator('[class*="bg-"][class*="text-"][class*="border-"]').first();
     await expect(connectionStatus).toBeVisible();
-    
+
     const statusText = await connectionStatus.textContent();
     expect(statusText).toMatch(/CONNECTED|CONNECTING|ERROR|DISCONNECTED/);
   });
@@ -36,9 +36,12 @@ test.describe('Phase 4: Control Tower (WebSocket MCP)', () => {
   });
 
   test('9-stage pipeline stages are displayed', async ({ page }) => {
+    const configureButton = page.locator('button', { hasText: /Configure/ });
+    await configureButton.click();
+
     const stages = [
       'Create Document',
-      'Partition Document', 
+      'Partition Document',
       'Extract Knowledge',
       'Embed Content',
       'Resolve Entities',
@@ -47,9 +50,9 @@ test.describe('Phase 4: Control Tower (WebSocket MCP)', () => {
       'Update Domain',
       'Complete'
     ];
-    
+
     for (const stageName of stages) {
-      const stageElement = page.locator('text=' + stageName);
+      const stageElement = page.locator('text=' + stageName).first();
       await expect(stageElement).toBeVisible();
     }
   });
@@ -65,6 +68,9 @@ test.describe('Phase 4: Control Tower (WebSocket MCP)', () => {
   });
 
   test('Reset button is present', async ({ page }) => {
+    const configureButton = page.locator('button', { hasText: /Configure/ });
+    await configureButton.click();
+
     const resetButton = page.locator('button', { hasText: /Reset/ });
     await expect(resetButton).toBeVisible();
   });

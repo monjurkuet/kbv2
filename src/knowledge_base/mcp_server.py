@@ -4,6 +4,7 @@ Implements Model Context Protocol for external tool integration.
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -100,9 +101,66 @@ class KBV2MCPProtocol(MCPProtocol):
 
     def __init__(self):
         super().__init__()
-        self.orchestrator = IngestionOrchestrator()
+        self.orchestrator = IngestionOrchestrator(
+            progress_callback=self._send_progress_update
+        )
         self.text_to_sql_agent = None
         self.vector_store = VectorStore()
+        self.current_websocket: Optional[WebSocket] = None
+
+    async def _send_progress_update(self, progress_data: Dict[str, Any]) -> None:
+        """Send progress update to the current WebSocket client.
+
+        Args:
+            progress_data: Dictionary containing progress information.
+        """
+        if self.current_websocket:
+            message = {
+                "type": "progress",
+                **progress_data,
+            }
+            try:
+                await self.current_websocket.send_text(json.dumps(message))
+            except Exception:
+                pass
+
+    async def connect(self, websocket: WebSocket) -> None:
+        """Accept WebSocket connection and add to clients list."""
+        await websocket.accept()
+        self.clients.append(websocket)
+        self.current_websocket = websocket
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        """Remove WebSocket from clients list."""
+        if websocket in self.clients:
+            self.clients.remove(websocket)
+        if self.current_websocket == websocket:
+            self.current_websocket = None
+
+    async def handle_message(self, websocket: WebSocket, message: str) -> None:
+        """Process incoming MCP message and send response."""
+        self.current_websocket = websocket
+        request_id = None
+        try:
+            # Parse JSON message
+            data = json.loads(message)
+            request_id = data.get("id")
+            request = MCPRequest(**data)
+
+            # Process the request
+            response = await self.process_request(request)
+
+            # Send response back to client
+            await websocket.send_text(response.json())
+
+        except Exception as e:
+            # Send error response
+            error_response = MCPResponse(
+                result=None,
+                error=f"Failed to process request: {str(e)}",
+                id=request_id,
+            )
+            await websocket.send_text(error_response.json())
 
     async def initialize(self):
         """Initialize the KBV2 MCP protocol components."""
@@ -165,16 +223,64 @@ class KBV2MCPProtocol(MCPProtocol):
         if not file_path:
             raise ValueError("file_path parameter is required")
 
-        document = await self.orchestrator.process_document(
-            file_path=file_path, document_name=document_name, domain=domain
+        # Track start time for duration calculation
+        start_time = time.time()
+
+        # Send initial progress update
+        await self._send_progress_update(
+            {
+                "stage": 0,
+                "status": "started",
+                "message": f"Starting ingestion of {document_name or file_path}",
+                "timestamp": time.time(),
+                "duration": 0.0,
+            }
         )
 
-        return {
-            "document_id": str(document.id),
-            "document_name": document.name,
-            "status": document.status,
-            "domain": document.domain,
-        }
+        try:
+            # Process the document
+            document = await self.orchestrator.process_document(
+                file_path=file_path, document_name=document_name, domain=domain
+            )
+
+            # Calculate duration
+            duration = time.time() - start_time
+
+            # Send completion progress update
+            await self._send_progress_update(
+                {
+                    "stage": 9,
+                    "status": "completed",
+                    "message": f"Document ingestion completed successfully in {duration:.2f}s",
+                    "timestamp": time.time(),
+                    "duration": duration,
+                }
+            )
+
+            return {
+                "document_id": str(document.id),
+                "document_name": document.name,
+                "status": document.status,
+                "domain": document.domain,
+                "duration": duration,
+            }
+        except Exception as e:
+            # Calculate duration even on failure
+            duration = time.time() - start_time
+
+            # Send failure progress update
+            await self._send_progress_update(
+                {
+                    "stage": 9,
+                    "status": "failed",
+                    "message": f"Document ingestion failed after {duration:.2f}s: {str(e)}",
+                    "timestamp": time.time(),
+                    "duration": duration,
+                    "error": str(e),
+                }
+            )
+
+            raise
 
     async def _handle_query_text_to_sql(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle text-to-SQL query request.

@@ -1,4 +1,4 @@
-import { createSignal, Show, Match, Switch } from 'solid-js';
+import { createSignal, Show, Match, Switch, onMount } from 'solid-js';
 import StageStepper from './StageStepper';
 import TerminalLog from './TerminalLog';
 import type { IngestionStoreType } from '../../stores/ingestionStore';
@@ -14,6 +14,10 @@ const IngestionMonitor = (props: IngestionMonitorProps) => {
   const [domain, setDomain] = createSignal('general');
   const [showConfig, setShowConfig] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  onMount(() => {
+    ingestionStore.connect();
+  });
 
   const handleStartIngestion = () => {
     try {
@@ -59,7 +63,7 @@ const IngestionMonitor = (props: IngestionMonitorProps) => {
 
           <div class="flex items-center space-x-3">
             <div class={`px-3 py-1 rounded-full text-xs font-semibold border ${getConnectionStatusColor()}`}>
-              {ingestionStore.connectionStatus.toUpperCase()}
+              {(ingestionStore.connectionStatus || 'disconnected').toUpperCase()}
             </div>
 
             <button

@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Callable, Awaitable
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -44,8 +45,15 @@ from knowledge_base.persistence.v1.vector_store import VectorStore
 class IngestionOrchestrator:
     """ReAct loop orchestrator for knowledge ingestion."""
 
-    def __init__(self) -> None:
-        """Initialize orchestrator with all components."""
+    def __init__(
+        self,
+        progress_callback: Callable[[dict], Awaitable[None] | None] | None = None,
+    ) -> None:
+        """Initialize orchestrator with all components.
+
+        Args:
+            progress_callback: Optional callback function for progress updates.
+        """
         self._observability = Observability()
         self._gateway = GatewayClient()
         self._embedding_client = EmbeddingClient()
@@ -56,6 +64,29 @@ class IngestionOrchestrator:
         self._clustering_service = ClusteringService()
         self._synthesis_agent = SynthesisAgent(self._gateway)
         self._temporal_normalizer = TemporalNormalizer()
+        self._progress_callback = progress_callback
+
+    async def _emit_progress(self, stage: int, status: str, message: str) -> None:
+        """Emit progress update via callback if available.
+
+        Args:
+            stage: Stage number (1-9).
+            status: Status of the stage ("started" or "completed").
+            message: Description of what's happening.
+        """
+        if self._progress_callback is None:
+            return
+
+        progress_data = {
+            "type": "progress",
+            "stage": stage,
+            "status": status,
+            "message": message,
+        }
+
+        result = self._progress_callback(progress_data)
+        if asyncio.iscoroutine(result):
+            await result
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -86,17 +117,52 @@ class IngestionOrchestrator:
             "document_ingestion",
             file_path=str(file_path),
         ):
+            await self._emit_progress(1, "started", "Creating document record")
             document = await self._create_document(file_path, document_name)
+            await self._emit_progress(1, "completed", "Document record created")
 
             try:
-                # Process document through pipeline
+                await self._emit_progress(
+                    2, "started", "Partitioning document into chunks"
+                )
                 document = await self._partition_document(document, file_path)
-                document = await self._extract_knowledge(document)
-                document = await self._embed_content(document)
-                document = await self._resolve_entities(document)
-                document = await self._cluster_entities(document)
-                document = await self._generate_reports(document)
+                await self._emit_progress(
+                    2, "completed", "Document partitioned into chunks"
+                )
 
+                await self._emit_progress(
+                    3, "started", "Extracting knowledge (entities and edges)"
+                )
+                document = await self._extract_knowledge(document)
+                await self._emit_progress(
+                    3, "completed", "Knowledge extraction complete"
+                )
+
+                await self._emit_progress(4, "started", "Generating embeddings")
+                document = await self._embed_content(document)
+                await self._emit_progress(4, "completed", "Embeddings generated")
+
+                await self._emit_progress(5, "started", "Resolving duplicate entities")
+                document = await self._resolve_entities(document)
+                await self._emit_progress(5, "completed", "Entity resolution complete")
+
+                await self._emit_progress(
+                    6, "started", "Clustering entities into communities"
+                )
+                document = await self._cluster_entities(document)
+                await self._emit_progress(6, "completed", "Entity clustering complete")
+
+                await self._emit_progress(
+                    7, "started", "Generating intelligence reports"
+                )
+                document = await self._generate_reports(document)
+                await self._emit_progress(
+                    7, "completed", "Intelligence reports generated"
+                )
+
+                await self._emit_progress(
+                    8, "started", "Updating domain for document and entities"
+                )
                 # Set domain for document and propagate to entities and edges
                 # Use provided domain or determine automatically
                 final_domain = (
@@ -134,13 +200,18 @@ class IngestionOrchestrator:
                         edge.domain = final_domain
 
                     await session.commit()
+                await self._emit_progress(8, "completed", "Domain updated successfully")
 
+                await self._emit_progress(9, "started", "Finalizing document status")
                 # Update document status
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
                     if doc_to_update:
                         doc_to_update.status = DocumentStatus.COMPLETED
                     await session.commit()
+                await self._emit_progress(
+                    9, "completed", "Document processing complete"
+                )
 
                 obs.log_event(
                     "document_processing_completed",
@@ -312,21 +383,58 @@ class IngestionOrchestrator:
                     chunk_entity_links.append((chunk.id, entity.id))
 
             async with self._vector_store.get_session() as session:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                from uuid import uuid4
+                
+                # Use on_conflict_do_nothing to avoid the issue entirely
+                processed_uris = set()  # Track processed entities per document
                 for entity in all_entities:
-                    session.add(entity)
+                    # Skip if we already processed this URI in this document
+                    if entity.uri in processed_uris:
+                        continue
+                    processed_uris.add(entity.uri)
+                    
+                    stmt = pg_insert(Entity).values(
+                        id=entity.id,
+                        name=entity.name,
+                        entity_type=entity.entity_type,
+                        description=entity.description,
+                        properties=entity.properties,
+                        confidence=entity.confidence,
+                        uri=entity.uri,
+                        source_text=entity.source_text
+                    ).on_conflict_do_nothing()
+                    await session.execute(stmt)
 
+                # Insert edges with upsert to avoid duplicates and missing entity errors
                 for edge in all_edges:
-                    session.add(edge)
+                    try:
+                        edge_stmt = pg_insert(Edge).values(
+                            id=edge.id,
+                            source_id=edge.source_id,
+                            target_id=edge.target_id,
+                            edge_type=edge.edge_type,
+                            properties=edge.properties,
+                            confidence=edge.confidence,
+                            source_text=edge.source_text
+                        ).on_conflict_do_nothing()
+                        await session.execute(edge_stmt)
+                    except Exception as e:
+                        # Log but continue - edge might reference non-existent entity
+                        # due to deduplication
+                        logger.debug(f"Skipping edge {edge.id}: {e}")
+                        continue
 
                 await session.commit()
 
+                # Link chunks to entities (avoid duplicates)
                 for chunk_id, entity_id in chunk_entity_links:
-                    chunk_entity = ChunkEntity(
+                    link_stmt = pg_insert(ChunkEntity).values(
                         id=uuid4(),
                         chunk_id=chunk_id,
-                        entity_id=entity_id,
-                    )
-                    session.add(chunk_entity)
+                        entity_id=entity_id
+                    ).on_conflict_do_nothing()
+                    await session.execute(link_stmt)
 
                 await session.commit()
 

@@ -3,7 +3,7 @@ import { backendClient } from '../helpers/backend-client';
 
 test.describe('Phase 1: Type Bridge', () => {
   test('backend health check responds with 200', async ({ request }) => {
-    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:5001'}/health`);
+    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:8765'}/health`);
     expect(response.status()).toBe(200);
     
     const body = await response.json();
@@ -15,7 +15,7 @@ test.describe('Phase 1: Type Bridge', () => {
   });
 
   test('AIP-193 response unwrapping works correctly', async ({ request }) => {
-    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:5001'}/api/v1/openapi`);
+    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:8765'}/api/v1/openapi`);
     expect(response.ok()).toBeTruthy();
     
     const body = await response.json();
@@ -33,7 +33,7 @@ test.describe('Phase 1: Type Bridge', () => {
   });
 
   test('OpenAPI schema validation', async ({ request }) => {
-    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:5001'}/api/v1/openapi`);
+    const response = await request.get(`${process.env.API_BASE_URL || 'http://localhost:8765'}/api/v1/openapi`);
     expect(response.ok()).toBeTruthy();
     
     const json = await response.json();

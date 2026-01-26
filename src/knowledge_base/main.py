@@ -9,7 +9,7 @@ functionality following Google AIP standards.
 import logging
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from knowledge_base.common.aip193_middleware import AIP193ResponseMiddleware
 from knowledge_base.common.error_handlers import setup_exception_handlers
-from knowledge_base import query_api, review_api, graph_api, document_api
+from knowledge_base import query_api, review_api, graph_api, document_api, mcp_server
 
 
 logging.basicConfig(
@@ -108,6 +108,19 @@ app.include_router(review_api.router, tags=["review"])
 app.include_router(graph_api.router, tags=["graphs"])
 app.include_router(document_api.router, tags=["documents"])
 
+from knowledge_base.mcp_server import kbv2_protocol
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await kbv2_protocol.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            await kbv2_protocol.handle_message(websocket, message)
+    except WebSocketDisconnect:
+        kbv2_protocol.disconnect(websocket)
+
 
 @app.get("/api/v1/openapi")
 async def get_openapi():
@@ -165,8 +178,11 @@ async def startup_event():
             )
             set_session_factory(session_factory)
             logger.info("Async session factory initialized")
-        else:
-            logger.warning("DATABASE_URL not set, skipping table creation")
+
+        from knowledge_base.mcp_server import kbv2_protocol
+
+        await kbv2_protocol.initialize()
+        logger.info("MCP server initialized")
 
     except Exception as e:
         logger.error(f"Error during startup: {e}", exc_info=True)
@@ -192,7 +208,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8765,
         reload=True,
         reload_dirs=["."],
         log_config=None,  # Use our custom logging configuration

@@ -15,16 +15,16 @@ test.describe('Phase 5: Judge (Review Queue)', () => {
   });
 
   test('Review queue header is visible', async ({ page }) => {
-    const header = page.locator('text=Review Queue');
+    const header = page.locator('text=Review Queue').first();
     await expect(header).toBeVisible();
   });
 
   test('Review items or empty state are displayed', async ({ page }) => {
     const reviewItems = page.locator('.ReviewQueue [class*="hover:bg-gray-"]');
-    
+
     const itemCount = await reviewItems.count();
     if (itemCount === 0) {
-      await expect(page.locator('text=/No pending reviews|All reviews have been processed/')).toBeVisible();
+      await expect(page.locator('text=/No pending reviews|All reviews have been processed/').first()).toBeVisible();
     } else {
       expect(itemCount).toBeGreaterThan(0);
       await expect(reviewItems.first()).toBeVisible();

@@ -127,6 +127,90 @@ export type APIResponse_DocumentSpansResponse_ = {
   } | null;
 };
 
+export type APIResponse_GraphologyExport_ = {
+  /**
+   * Indicates if request succeeded
+   */
+  success: boolean;
+  /**
+   * Response payload on success
+   */
+  data?: GraphologyExport | null;
+  /**
+   * Error details on failure
+   */
+  error?: APIError | null;
+  /**
+   * Additional metadata (pagination, timing, request_id)
+   */
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+};
+
+export type APIResponse_GraphSummaryResponse_ = {
+  /**
+   * Indicates if request succeeded
+   */
+  success: boolean;
+  /**
+   * Response payload on success
+   */
+  data?: GraphSummaryResponse | null;
+  /**
+   * Error details on failure
+   */
+  error?: APIError | null;
+  /**
+   * Additional metadata (pagination, timing, request_id)
+   */
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+};
+
+export type APIResponse_NeighborhoodResponse_ = {
+  /**
+   * Indicates if request succeeded
+   */
+  success: boolean;
+  /**
+   * Response payload on success
+   */
+  data?: NeighborhoodResponse | null;
+  /**
+   * Error details on failure
+   */
+  error?: APIError | null;
+  /**
+   * Additional metadata (pagination, timing, request_id)
+   */
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+};
+
+export type APIResponse_PathResponse_ = {
+  /**
+   * Indicates if request succeeded
+   */
+  success: boolean;
+  /**
+   * Response payload on success
+   */
+  data?: PathResponse | null;
+  /**
+   * Error details on failure
+   */
+  error?: APIError | null;
+  /**
+   * Additional metadata (pagination, timing, request_id)
+   */
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+};
+
 export type APIResponse_W3CAnnotation_ = {
   /**
    * Indicates if request succeeded
@@ -299,8 +383,242 @@ export type ErrorInfo = {
   };
 };
 
+/**
+ * Sigma.js compatible edge representation.
+ */
+export type GraphEdge = {
+  /**
+   * Unique edge identifier (UUID)
+   */
+  key: string;
+  /**
+   * Source node key
+   */
+  source: string;
+  /**
+   * Target node key
+   */
+  target: string;
+  /**
+   * Edge attributes: label, weight, type, confidence, color
+   */
+  attributes?: {
+    [key: string]: unknown;
+  };
+};
+
+/**
+ * Sigma.js compatible node representation.
+ */
+export type GraphNode = {
+  /**
+   * Unique node identifier (UUID)
+   */
+  key: string;
+  /**
+   * Display label for the node
+   */
+  label: string;
+  /**
+   * Node attributes: x, y, size, color, community, entity_type, etc.
+   */
+  attributes?: {
+    [key: string]: unknown;
+  };
+};
+
+/**
+ * Graphology JSON format for Sigma.js compatibility.
+ */
+export type GraphologyExport = {
+  /**
+   * Graph-level attributes (name, description, etc.)
+   */
+  attributes?: {
+    [key: string]: unknown;
+  };
+  /**
+   * Graph options for Sigma.js
+   */
+  options?: {
+    [key: string]: unknown;
+  };
+  /**
+   * All nodes in graph
+   */
+  nodes: Array<GraphNode>;
+  /**
+   * All edges in graph
+   */
+  edges: Array<GraphEdge>;
+};
+
+/**
+ * Response for community-level graph summary view.
+ */
+export type GraphSummaryResponse = {
+  /**
+   * Community nodes (level 0)
+   */
+  nodes: Array<GraphNode>;
+  /**
+   * Aggregated inter-community edges
+   */
+  edges: Array<GraphEdge>;
+  /**
+   * Total number of nodes
+   */
+  total_nodes: number;
+  /**
+   * Total number of edges
+   */
+  total_edges: number;
+  /**
+   * Graph statistics
+   */
+  stats?: {
+    [key: string]: unknown;
+  };
+};
+
+/**
+ * Health check response model.
+ */
+export type HealthResponse = {
+  status: string;
+  version: string;
+  name: string;
+};
+
 export type HTTPValidationError = {
   detail?: Array<ValidationError>;
+};
+
+/**
+ * Response for entity neighborhood expansion.
+ */
+export type NeighborhoodResponse = {
+  /**
+   * Center entity node
+   */
+  center_node: GraphNode;
+  /**
+   * Neighbor nodes including center
+   */
+  nodes: Array<GraphNode>;
+  /**
+   * Edges connecting neighbors
+   */
+  edges: Array<GraphEdge>;
+  /**
+   * Number of new nodes added
+   */
+  expanded_count: number;
+  /**
+   * Maximum edge confidence in result
+   */
+  max_confidence: number;
+  /**
+   * Minimum edge confidence in result
+   */
+  min_confidence: number;
+};
+
+/**
+ * Request model for graph path finding operations.
+ */
+export type PathFindingRequest = {
+  /**
+   * Source node ID (graphs/{graph}/nodes/{node})
+   */
+  source: string;
+  /**
+   * Target node ID
+   */
+  target: string;
+  /**
+   * Path finding algorithm to use
+   */
+  algorithm?: string;
+  /**
+   * Maximum number of hops allowed in path
+   */
+  max_hops?: number;
+  /**
+   * Minimum confidence threshold for edges
+   */
+  min_confidence?: number;
+  /**
+   * Optional filter for specific edge types
+   */
+  edge_types?: Array<string> | null;
+};
+
+/**
+ * Response for path finding operations.
+ */
+export type PathResponse = {
+  /**
+   * Source node
+   */
+  source: string;
+  /**
+   * Target node
+   */
+  target: string;
+  /**
+   * List of paths (each path is list of node IDs)
+   */
+  paths: Array<Array<string>>;
+  /**
+   * Confidence score for each path
+   */
+  confidence_scores: Array<number>;
+  /**
+   * Total number of paths found
+   */
+  total_paths: number;
+  /**
+   * Algorithm used
+   */
+  algorithm: string;
+};
+
+/**
+ * Pydantic model for approving a review.
+ */
+export type ReviewApproval = {
+  reviewer_notes?: string | null;
+};
+
+/**
+ * Pydantic model for review queue items.
+ */
+export type ReviewItem = {
+  id: string;
+  item_type: string;
+  entity_id?: string | null;
+  edge_id?: string | null;
+  document_id?: string | null;
+  merged_entity_ids?: Array<string> | null;
+  confidence_score?: number | null;
+  grounding_quote?: string | null;
+  source_text?: string | null;
+  status: string;
+  priority: number;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewer_notes?: string | null;
+};
+
+/**
+ * Pydantic model for rejecting a review with corrections.
+ */
+export type ReviewRejection = {
+  corrections: {
+    [key: string]: unknown;
+  };
+  reviewer_notes?: string | null;
 };
 
 /**
@@ -363,3 +681,328 @@ export type W3CAnnotation = {
   creator?: string | null;
   motivation?: string | null;
 };
+
+export type HealthCheckHealthGetResponse = HealthResponse;
+
+export type HealthCheckHealthGetError = unknown;
+
+export type ReadinessCheckReadyGetResponse = HealthResponse;
+
+export type ReadinessCheckReadyGetError = unknown;
+
+export type TranslateQueryApiV1QueryTranslatePostData = {
+  query: {
+    nl_query: string;
+  };
+};
+
+export type TranslateQueryApiV1QueryTranslatePostResponse = {
+  [key: string]: unknown;
+};
+
+export type TranslateQueryApiV1QueryTranslatePostError =
+  | unknown
+  | HTTPValidationError;
+
+export type ExecuteQueryApiV1QueryExecutePostData = {
+  query: {
+    nl_query: string;
+  };
+};
+
+export type ExecuteQueryApiV1QueryExecutePostResponse = {
+  [key: string]: unknown;
+};
+
+export type ExecuteQueryApiV1QueryExecutePostError =
+  | unknown
+  | HTTPValidationError;
+
+export type GetSchemaApiV1QuerySchemaGetResponse = {
+  [key: string]: unknown;
+};
+
+export type GetSchemaApiV1QuerySchemaGetError = unknown;
+
+export type GetPendingReviewsApiV1ReviewPendingGetData = {
+  query?: {
+    limit?: number;
+    offset?: number;
+  };
+};
+
+export type GetPendingReviewsApiV1ReviewPendingGetResponse = Array<ReviewItem>;
+
+export type GetPendingReviewsApiV1ReviewPendingGetError = HTTPValidationError;
+
+export type GetReviewApiV1ReviewReviewIdGetData = {
+  path: {
+    review_id: string;
+  };
+};
+
+export type GetReviewApiV1ReviewReviewIdGetResponse = ReviewItem;
+
+export type GetReviewApiV1ReviewReviewIdGetError = HTTPValidationError;
+
+export type ApproveReviewApiV1ReviewReviewIdApprovePostData = {
+  body: ReviewApproval;
+  path: {
+    review_id: string;
+  };
+};
+
+export type ApproveReviewApiV1ReviewReviewIdApprovePostResponse = boolean;
+
+export type ApproveReviewApiV1ReviewReviewIdApprovePostError =
+  HTTPValidationError;
+
+export type RejectReviewApiV1ReviewReviewIdRejectPostData = {
+  body: ReviewRejection;
+  path: {
+    review_id: string;
+  };
+};
+
+export type RejectReviewApiV1ReviewReviewIdRejectPostResponse = boolean;
+
+export type RejectReviewApiV1ReviewReviewIdRejectPostError =
+  HTTPValidationError;
+
+export type GetGraphSummaryApiV1GraphsGraphIdSummaryGetData = {
+  path: {
+    /**
+     * Graph ID
+     */
+    graph_id: string;
+  };
+  query?: {
+    /**
+     * Filter by domain
+     */
+    domain?: string | null;
+    /**
+     * Include centrality metrics
+     */
+    include_metrics?: boolean;
+    /**
+     * Community hierarchy level
+     */
+    level?: number;
+    /**
+     * Minimum entities per community
+     */
+    min_community_size?: number;
+  };
+};
+
+export type GetGraphSummaryApiV1GraphsGraphIdSummaryGetResponse =
+  APIResponse_GraphSummaryResponse_;
+
+export type GetGraphSummaryApiV1GraphsGraphIdSummaryGetError =
+  HTTPValidationError;
+
+export type GetNeighborhoodApiV1GraphsGraphIdNodesNodeIdNeighborhoodGetData = {
+  path: {
+    /**
+     * Graph ID
+     */
+    graph_id: string;
+    /**
+     * Center node ID
+     */
+    node_id: string;
+  };
+  query?: {
+    /**
+     * Traversal depth
+     */
+    depth?: number;
+    /**
+     * Edge direction to follow
+     */
+    direction?: string;
+    /**
+     * Filter by edge types
+     */
+    edge_types?: Array<string> | null;
+    /**
+     * Maximum nodes to return
+     */
+    max_nodes?: number;
+    /**
+     * Minimum confidence
+     */
+    min_confidence?: number;
+    /**
+     * Filter by entity types
+     */
+    node_types?: Array<string> | null;
+  };
+};
+
+export type GetNeighborhoodApiV1GraphsGraphIdNodesNodeIdNeighborhoodGetResponse =
+  APIResponse_NeighborhoodResponse_;
+
+export type GetNeighborhoodApiV1GraphsGraphIdNodesNodeIdNeighborhoodGetError =
+  HTTPValidationError;
+
+export type FindPathApiV1GraphsGraphIdFindPathPostData = {
+  body: PathFindingRequest;
+  path: {
+    /**
+     * Graph ID
+     */
+    graph_id: string;
+  };
+};
+
+export type FindPathApiV1GraphsGraphIdFindPathPostResponse =
+  APIResponse_PathResponse_;
+
+export type FindPathApiV1GraphsGraphIdFindPathPostError = HTTPValidationError;
+
+export type ExportGraphApiV1GraphsGraphIdExportGetData = {
+  path: {
+    /**
+     * Graph ID
+     */
+    graph_id: string;
+  };
+  query?: {
+    format?: string;
+    /**
+     * Include pre-calculated layout coordinates
+     */
+    include_layout?: boolean;
+  };
+};
+
+export type ExportGraphApiV1GraphsGraphIdExportGetResponse =
+  APIResponse_GraphologyExport_;
+
+export type ExportGraphApiV1GraphsGraphIdExportGetError = HTTPValidationError;
+
+export type GetDocumentApiV1DocumentsDocumentIdGetData = {
+  path: {
+    /**
+     * Document UUID
+     */
+    document_id: string;
+  };
+};
+
+export type GetDocumentApiV1DocumentsDocumentIdGetResponse =
+  APIResponse_DocumentResponse_;
+
+export type GetDocumentApiV1DocumentsDocumentIdGetError = HTTPValidationError;
+
+export type GetDocumentContentApiV1DocumentsDocumentIdContentGetData = {
+  path: {
+    /**
+     * Document UUID
+     */
+    document_id: string;
+  };
+  query?: {
+    /**
+     * Response format
+     */
+    format?: string;
+  };
+};
+
+export type GetDocumentContentApiV1DocumentsDocumentIdContentGetResponse =
+  APIResponse_DocumentContentResponse_;
+
+export type GetDocumentContentApiV1DocumentsDocumentIdContentGetError =
+  HTTPValidationError;
+
+export type GetDocumentSpansApiV1DocumentsDocumentIdSpansGetData = {
+  path: {
+    /**
+     * Document UUID
+     */
+    document_id: string;
+  };
+  query?: {
+    /**
+     * Minimum confidence threshold
+     */
+    confidence_threshold?: number;
+    /**
+     * Filter by entity types
+     */
+    entity_types?: Array<string> | null;
+    /**
+     * Only return spans with grounding quotes
+     */
+    verified_only?: boolean;
+  };
+};
+
+export type GetDocumentSpansApiV1DocumentsDocumentIdSpansGetResponse =
+  APIResponse_DocumentSpansResponse_;
+
+export type GetDocumentSpansApiV1DocumentsDocumentIdSpansGetError =
+  HTTPValidationError;
+
+export type GetDocumentEntitiesApiV1DocumentsDocumentIdEntitiesGetData = {
+  path: {
+    /**
+     * Document UUID
+     */
+    document_id: string;
+  };
+  query?: {
+    /**
+     * Filter by entity types
+     */
+    entity_types?: Array<string> | null;
+    /**
+     * Include text locations
+     */
+    include_spans?: boolean;
+    limit?: number;
+    /**
+     * Minimum confidence
+     */
+    min_confidence?: number;
+    offset?: number;
+  };
+};
+
+export type GetDocumentEntitiesApiV1DocumentsDocumentIdEntitiesGetResponse =
+  APIResponse_DocumentEntitiesResponse_;
+
+export type GetDocumentEntitiesApiV1DocumentsDocumentIdEntitiesGetError =
+  HTTPValidationError;
+
+export type SearchDocumentsApiV1DocumentsSearchPostData = {
+  body: DocumentSearchRequest;
+};
+
+export type SearchDocumentsApiV1DocumentsSearchPostResponse =
+  APIResponse_DocumentSearchResponse_;
+
+export type SearchDocumentsApiV1DocumentsSearchPostError = HTTPValidationError;
+
+export type CreateAnnotationApiV1DocumentsDocumentIdAnnotationsPostData = {
+  body: W3CAnnotation;
+  path: {
+    /**
+     * Document UUID
+     */
+    document_id: string;
+  };
+};
+
+export type CreateAnnotationApiV1DocumentsDocumentIdAnnotationsPostResponse =
+  APIResponse_W3CAnnotation_;
+
+export type CreateAnnotationApiV1DocumentsDocumentIdAnnotationsPostError =
+  HTTPValidationError;
+
+export type GetOpenapiApiV1OpenapiGetResponse = unknown;
+
+export type GetOpenapiApiV1OpenapiGetError = unknown;

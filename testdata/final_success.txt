@@ -1,0 +1,1 @@
+Alphabet subsidiary DeepMind announced AlphaFold3 for protein folding predictions.

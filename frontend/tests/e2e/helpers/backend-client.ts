@@ -9,7 +9,7 @@ class BackendClient {
   private baseURL: string;
   
   constructor() {
-    this.baseURL = process.env.API_BASE_URL || 'http://localhost:5001';
+    this.baseURL = process.env.API_BASE_URL || 'http://localhost:8765';
   }
   
   async healthCheck() {

@@ -1,5 +1,5 @@
 import { createSignal, createResource, createEffect } from 'solid-js';
-import { apiClient } from '../../api/custom-client';
+import { getPendingReviewsApiV1ReviewPendingGet, getReviewApiV1ReviewReviewIdGet, approveReviewApiV1ReviewReviewIdApprovePost, rejectReviewApiV1ReviewReviewIdRejectPost } from '../../api/sdk.gen';
 import type { ReviewStoreType } from '../../stores/reviewStore';
 
 interface UseReviewQueueProps {
@@ -24,7 +24,7 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
     reviewStore.clearError();
 
     try {
-      const response = await apiClient.GET('/api/v1/review/pending', {
+      const response = await getPendingReviewsApiV1ReviewPendingGet({
         params: {
           query: {
             limit,
@@ -33,8 +33,8 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
         }
       });
 
-      if (response && Array.isArray(response)) {
-        reviewStore.setReviewQueue(response, offset > 0 ? offset : 0);
+      if (response.data && Array.isArray(response.data)) {
+        reviewStore.setReviewQueue(response.data, offset > 0 ? offset : 0);
       }
 
       setLoading(false);
@@ -52,14 +52,14 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
     reviewStore.setLoading(true);
 
     try {
-      const response = await apiClient.GET('/api/v1/review/{review_id}', {
+      const response = await getReviewApiV1ReviewReviewIdGet({
         params: {
           path: { review_id: reviewId }
         }
       });
 
-      if (response) {
-        reviewStore.setActiveReview(response);
+      if (response.data) {
+        reviewStore.setActiveReview(response.data);
       }
 
       setLoading(false);
@@ -75,11 +75,14 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
 
     try {
       const body = notes ? { reviewer_notes: notes } : {};
-      const response = await apiClient.POST(`/api/v1/review/${reviewId}/approve`, {
+      const response = await approveReviewApiV1ReviewReviewIdApprovePost({
+        params: {
+          path: { review_id: reviewId }
+        },
         body,
       });
 
-      if (response) {
+      if (response.data) {
         reviewStore.updateReview(reviewId, { 
           status: 'approved', 
           reviewed_at: new Date().toISOString(),
@@ -102,11 +105,14 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
 
     try {
       const body = corrections ? { corrections, reviewer_notes: notes } : { reviewer_notes: notes };
-      const response = await apiClient.POST(`/api/v1/review/${reviewId}/reject`, {
+      const response = await rejectReviewApiV1ReviewReviewIdRejectPost({
+        params: {
+          path: { review_id: reviewId }
+        },
         body,
       });
 
-      if (response) {
+      if (response.data) {
         reviewStore.updateReview(reviewId, { 
           status: 'rejected', 
           reviewed_at: new Date().toISOString(),
@@ -125,25 +131,8 @@ export function useReviewQueue({ reviewStore }: UseReviewQueueProps): ReviewQueu
   };
 
   const editReview = async (reviewId: string, updates: object) => {
-    setLoading(true);
-
-    try {
-      const response = await apiClient.PUT(`/api/v1/review/${reviewId}`, {
-        body: updates,
-      });
-
-      if (response) {
-        reviewStore.updateReview(reviewId, { ...updates });
-        return true;
-      }
-
-      setLoading(false);
-      return false;
-    } catch (error) {
-      console.error('Failed to edit review:', error);
-      setLoading(false);
-      return false;
-    }
+    console.warn('Edit review not implemented - no API endpoint available');
+    return false;
   };
 
   return {

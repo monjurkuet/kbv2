@@ -36,14 +36,14 @@ const StageStepper = (props: StageStepperProps) => {
   };
 
   return (
-    <div class="w-full">
+    <div class="w-full StageStepper">
       <div class="mb-4">
         <div class="flex justify-between items-center mb-2">
           <span class="text-sm font-medium text-gray-700">
-            Stage {ingestionStore.currentStage} of {ingestionStore.stages.length}
+            Stage {ingestionStore.currentStage || 0} of {ingestionStore.stages?.length || 0}
           </span>
           <span class="text-sm text-gray-500">
-            {Math.round(ingestionStore.overallProgress)}% Complete
+            {Math.round(ingestionStore.overallProgress || 0)}% Complete
           </span>
         </div>
         <div class="w-full bg-gray-200 rounded-full h-2">
@@ -55,13 +55,13 @@ const StageStepper = (props: StageStepperProps) => {
       </div>
 
       <div class="space-y-3">
-        <For each={ingestionStore.stages}>
+        <For each={ingestionStore.stages || []}>
           {(stage) => {
             const badge = getStatusBadge(stage.status);
             return (
               <div class={`flex items-start space-x-3 p-3 rounded-lg border ${
-                stage.status === 'running' 
-                  ? 'bg-blue-50 border-blue-200' 
+                stage.status === 'running'
+                  ? 'bg-blue-50 border-blue-200'
                   : stage.status === 'completed'
                   ? 'bg-green-50 border-green-200'
                   : stage.status === 'failed'

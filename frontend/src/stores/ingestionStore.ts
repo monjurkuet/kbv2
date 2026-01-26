@@ -1,9 +1,11 @@
 import { createStore } from 'solid-js/store';
 
+export type StageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'started';
+
 export interface Stage {
   number: number;
   name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: StageStatus;
   startTime?: number;
   durationMs?: number;
   message?: string;
@@ -74,7 +76,7 @@ export const createIngestionStore = () => {
 
   const connect = () => {
     console.log('Connecting to MCP WebSocket...');
-    const ws = new WebSocket('ws://localhost:8000/ws');
+    const ws = new WebSocket('ws://localhost:8765/ws');
     
     ws.onopen = () => {
       console.log('WebSocket connected');
@@ -147,7 +149,7 @@ export const createIngestionStore = () => {
     message?: string
   ) => {
     setStore('stages', s => s.number === stageNumber, {
-      status: status === 'started' ? 'running' : status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'pending',
+      status: status === 'started' ? 'running' : status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : status,
       startTime: status === 'started' ? Date.now() : undefined,
       durationMs,
       message
@@ -159,8 +161,6 @@ export const createIngestionStore = () => {
   };
   
   const startIngestion = async (filePath: string, documentName?: string, domain?: string) => {
-    connect();
-    
     setStore({
       isRunning: true,
       stages: STAGES.map(s => ({ ...s, status: 'pending' })),
@@ -169,23 +169,40 @@ export const createIngestionStore = () => {
       currentStage: 0,
       documentId: `doc_${Date.now()}`
     });
-    
-    if (store.ws?.readyState === WebSocket.OPEN) {
-      const request = {
-        method: 'kbv2/ingest_document',
-        params: {
-          file_path: filePath,
-          document_name: documentName,
-          domain: domain
-        },
-        id: `req_${Date.now()}`
-      };
-      
-      store.ws.send(JSON.stringify(request));
-      addLog('info', `Starting ingestion: ${filePath}`);
-    } else {
-      addLog('error', 'WebSocket not connected. Cannot start ingestion.');
-    }
+
+    const ensureConnected = () => new Promise<void>((resolve) => {
+      if (store.ws?.readyState === WebSocket.OPEN) {
+        resolve();
+      } else {
+        connect();
+        const checkConnection = () => {
+          if (store.ws?.readyState === WebSocket.OPEN) {
+            resolve();
+          } else {
+            setTimeout(checkConnection, 100);
+          }
+        };
+        setTimeout(checkConnection, 100);
+      }
+    });
+
+    await ensureConnected();
+    sendIngestionRequest(filePath, documentName, domain);
+  };
+
+  const sendIngestionRequest = (filePath: string, documentName?: string, domain?: string) => {
+    const request = {
+      method: 'kbv2/ingest_document',
+      params: {
+        file_path: filePath,
+        document_name: documentName,
+        domain: domain
+      },
+      id: `req_${Date.now()}`
+    };
+
+    store.ws?.send(JSON.stringify(request));
+    addLog('info', `Starting ingestion: ${filePath}`);
   };
   
   const reset = () => {

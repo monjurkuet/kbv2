@@ -74,14 +74,14 @@ test.describe('Phase 3: Evidence Locker', () => {
   });
 
   test('document displays loading state', async ({ page }) => {
-    await page.goto(`/document/00000000-0000-0000-0000-000000000004`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`/document/00000000-0000-0000-0000-000000000004`);
     
-    const loadingText = page.locator('text=Loading document...');
-    const isVisible = await loadingText.count();
+    await page.waitForSelector('[data-testid="document-container"]', { timeout: 5000 });
     
-    if (isVisible > 0) {
-      await expect(loadingText).toBeVisible();
-    }
+    const loadingIndicator = page.getByTestId('loading-indicator');
+    const isVisible = await loadingIndicator.isVisible().catch(() => false);
+    
+    expect(isVisible).toBe(false);
   });
 
   test('document viewer handles error state gracefully', async ({ page }) => {

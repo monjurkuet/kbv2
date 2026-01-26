@@ -1,5 +1,5 @@
 import { createResource, createSignal, onMount, onCleanup, createEffect, createComputed } from 'solid-js';
-import { apiClient } from '../../api/custom-client';
+import { getGraphSummaryApiV1GraphsGraphIdSummaryGet, getNeighborhoodApiV1GraphsGraphIdNodesNodeIdNeighborhoodGet } from '../../api/sdk.gen';
 import type { GraphStoreType } from '../../stores/graphStore';
 
 interface UseGraphLoaderProps {
@@ -21,7 +21,7 @@ export function useGraphLoader({ graphStore }: UseGraphLoaderProps): GraphLoader
     graphStore.clearError();
 
     try {
-      const response = await apiClient.GET('/api/v1/graphs/{graph_id}:summary', {
+      const response = await getGraphSummaryApiV1GraphsGraphIdSummaryGet({
         params: {
           path: { graph_id: graphId },
           query: {
@@ -32,11 +32,11 @@ export function useGraphLoader({ graphStore }: UseGraphLoaderProps): GraphLoader
         },
       });
 
-      if (!response) {
+      if (!response.data) {
         throw new Error('No response from server');
       }
 
-      graphStore.setGraph(graphId, response);
+      graphStore.setGraph(graphId, response.data);
       setLoading(false);
       graphStore.setLoading(false);
     } catch (error) {
@@ -57,25 +57,22 @@ export function useGraphLoader({ graphStore }: UseGraphLoaderProps): GraphLoader
     graphStore.setLoading(true);
 
     try {
-      const response = await apiClient.GET(
-        '/api/v1/graphs/{graph_id}/nodes/{node_id}:neighborhood',
-        {
-          params: {
-            path: {
-              graph_id: graphId,
-              node_id: nodeId,
-            },
-            query: {
-              depth,
-              direction: 'bidirectional',
-              min_confidence: 0.7,
-              max_nodes: 1000,
-            },
+      const response = await getNeighborhoodApiV1GraphsGraphIdNodesNodeIdNeighborhoodGet({
+        params: {
+          path: {
+            graph_id: graphId,
+            node_id: nodeId,
+          },
+          query: {
+            depth,
+            direction: 'bidirectional',
+            min_confidence: 0.7,
+            max_nodes: 1000,
           },
         }
-      );
+      });
 
-      if (!response) {
+      if (!response.data) {
         throw new Error('No response from server');
       }
 
@@ -83,7 +80,7 @@ export function useGraphLoader({ graphStore }: UseGraphLoaderProps): GraphLoader
       graphStore.setLoading(false);
       graphStore.expandNode(nodeId);
 
-      return response;
+      return response.data;
     } catch (error) {
       console.error('Failed to load neighborhood:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

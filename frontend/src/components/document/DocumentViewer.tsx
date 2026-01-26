@@ -137,8 +137,8 @@ const DocumentViewer = (props: DocumentViewerProps) => {
           </div>
         </Show>
         <Show
-          when={props.documentStore.documentStore.documentContent}
-          fallback={<div class="text-center text-gray-500 py-8">Loading document...</div>}
+          when={!props.documentStore.documentStore.loading && props.documentStore.documentStore.documentContent}
+          fallback={<div class="text-center text-gray-500 py-8" data-testid="loading-indicator">Loading document...</div>}
         >
           <pre 
             class="whitespace-pre-wrap font-mono text-sm leading-relaxed text-gray-800"

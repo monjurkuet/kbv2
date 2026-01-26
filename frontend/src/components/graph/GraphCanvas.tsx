@@ -42,13 +42,13 @@ const GraphCanvas = (props: GraphCanvasProps) => {
 
   const graph = createMemo(() => {
     const storeData = props.graphStore.graphStore.graphData;
-    if (!storeData) return null;
+    if (!storeData || !storeData.nodes || !storeData.edges) return null;
 
     const graphInstance = new Graph({ type: 'directed', multi: true });
 
-    storeData.nodes.forEach((node) => {
-      const color = node.attributes.community_id ? ENTITY_COLORS.community : ENTITY_COLORS.center;
-      const size = node.attributes.size || Math.max(NODE_SIZES.min, Math.log(node.attributes.entity_count || 1) * 3);
+    storeData.nodes.forEach((node: any) => {
+      const color = node.attributes?.community_id ? ENTITY_COLORS.community : ENTITY_COLORS.center;
+      const size = node.attributes?.size || Math.max(NODE_SIZES.min, Math.log(node.attributes?.entity_count || 1) * 3);
 
       graphInstance.addNode(node.key, {
         x: node.attributes.x || Math.random() * 100,
@@ -60,11 +60,11 @@ const GraphCanvas = (props: GraphCanvasProps) => {
       });
     });
 
-    storeData.edges.forEach((edge) => {
-      const alpha = edge.attributes.confidence ? edge.attributes.confidence * 0.3 + 0.1 : 0.3;
+    storeData.edges.forEach((edge: any) => {
+      const alpha = edge.attributes?.confidence ? edge.attributes.confidence * 0.3 + 0.1 : 0.3;
       graphInstance.addEdge(edge.source, edge.target, {
         color: `rgba(0, 0, 0, ${alpha})`,
-        size: edge.attributes.weight || 1,
+        size: edge.attributes?.weight || 1,
         ...edge.attributes,
       });
     });
@@ -85,8 +85,7 @@ const GraphCanvas = (props: GraphCanvasProps) => {
 
     sigmaInstance = new Sigma(currentGraph, containerRef, {
       renderEdgeLabels: true,
-      enableEdgeHoverEvents: true,
-      enableNodeHoverEvents: true,
+      enableEdgeEvents: true,
       labelDensity: 0.07,
       labelGridCellSize: 100,
       labelRenderedSizeThreshold: 10,
@@ -108,13 +107,13 @@ const GraphCanvas = (props: GraphCanvasProps) => {
             if (neighborhood.nodes && neighborhood.edges) {
               neighborhood.nodes.forEach((node: ApiGraphNode) => {
                 if (!currentGraph.hasNode(node.key)) {
-                  const isNeighbor = node.attributes.community_id !== nodeData.community_id;
+                  const isNeighbor = node.attributes?.community_id !== nodeData.community_id;
                   const color = isNeighbor ? ENTITY_COLORS.neighbor : ENTITY_COLORS.center;
-                  const size = node.attributes.size || NODE_SIZES.min;
+                  const size = node.attributes?.size || NODE_SIZES.min;
 
                   currentGraph.addNode(node.key, {
-                    x: node.attributes.x || (Math.random() - 0.5) * 200 + (nodeData.x || 0),
-                    y: node.attributes.y || (Math.random() - 0.5) * 200 + (nodeData.y || 0),
+                    x: node.attributes?.x || (Math.random() - 0.5) * 200 + (nodeData.x || 0),
+                    y: node.attributes?.y || (Math.random() - 0.5) * 200 + (nodeData.y || 0),
                     size: size,
                     color: color,
                     label: node.label,
@@ -125,10 +124,11 @@ const GraphCanvas = (props: GraphCanvasProps) => {
 
               neighborhood.edges.forEach((edge: ApiGraphEdge) => {
                 if (!currentGraph.hasEdge(edge.source, edge.target)) {
-                  const alpha = edge.attributes.confidence ? edge.attributes.confidence * 0.3 + 0.1 : 0.3;
+                  const confidence = Number(edge.attributes?.confidence || 0);
+                  const alpha = confidence * 0.3 + 0.1;
                   currentGraph.addEdge(edge.source, edge.target, {
                     color: `rgba(0, 0, 0, ${alpha})`,
-                    size: edge.attributes.weight || 1,
+                    size: edge.attributes?.weight || 1,
                     ...edge.attributes,
                   });
                 }
@@ -145,10 +145,9 @@ const GraphCanvas = (props: GraphCanvasProps) => {
 
     sigmaInstance.on('enterNode', (event) => {
       setHoveredNode(event.node);
-      const pos = sigmaInstance?.viewportToFramedGraph(event);
-      if (pos) {
-        const canvasPos = sigmaInstance?.graphToCanvas(pos);
-        if (canvasPos) setTooltipPos({ x: canvasPos.x + 10, y: canvasPos.y - 30 });
+      const nodePos = currentGraph.getNodeAttributes(event.node);
+      if (nodePos) {
+        setTooltipPos({ x: nodePos.x + 10, y: nodePos.y - 30 });
       }
     });
 

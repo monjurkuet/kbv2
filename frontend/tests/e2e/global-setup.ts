@@ -1,7 +1,7 @@
 export default async function globalSetup() {
   console.log('Setting up global test environment...');
   
-  const backendUrl = process.env.API_BASE_URL || 'http://localhost:5001';
+  const backendUrl = process.env.API_BASE_URL || 'http://localhost:8765';
   
   try {
     const response = await fetch(`${backendUrl}/health`);
