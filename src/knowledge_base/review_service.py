@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from uuid import UUID
@@ -13,20 +13,37 @@ from .persistence.v1.schema import (
 from datetime import datetime
 import logging
 
+from knowledge_base.intelligence import (
+    HallucinationDetector,
+    EntityVerification,
+    RiskLevel,
+)
+from knowledge_base.clients import create_llm_client
+
 logger = logging.getLogger(__name__)
 
 
 class ReviewService:
     """Service for managing human review queue for low-confidence entity resolutions and relationships."""
 
-    def __init__(self, db_session: Session):
+    def __init__(
+        self, db_session: Session, enable_hallucination_detection: bool = True
+    ):
         """
         Initialize the ReviewService.
 
         Args:
             db_session: SQLAlchemy database session
+            enable_hallucination_detection: If True, use hallucination detection for prioritization
         """
         self.db = db_session
+        self._enable_hallucination_detection = enable_hallucination_detection
+        if enable_hallucination_detection:
+            self._hallucination_detector = HallucinationDetector()
+            self._llm_client = create_llm_client()
+        else:
+            self._hallucination_detector = None
+            self._llm_client = None
 
     def add_entity_for_review(
         self,
@@ -351,3 +368,70 @@ class ReviewService:
             return 6
         else:
             return 4
+
+    def _get_entity(self, entity_id: UUID) -> Optional[Entity]:
+        """Get entity from database by ID."""
+        from sqlalchemy import select
+
+        entity_result = self.db.execute(select(Entity).where(Entity.id == entity_id))
+        return entity_result.scalar_one_or_none()
+
+    async def verify_entity_for_review(
+        self, entity_id: UUID, source_text: str, confidence_score: float
+    ) -> Tuple[bool, int, str]:
+        """
+        Verify entity using hallucination detection.
+
+        Returns:
+            Tuple of (should_auto_approve, priority, reason)
+        """
+        if self._hallucination_detector and self._enable_hallucination_detection:
+            entity = self._get_entity(entity_id)
+            if entity:
+                try:
+                    verification = await self._hallucination_detector.verify_entity(
+                        entity=entity, context="", source_text=source_text
+                    )
+
+                    if (
+                        confidence_score >= 0.85
+                        and verification.risk_level == RiskLevel.LOW
+                    ):
+                        return True, 1, "auto_approved_high_confidence_low_risk"
+
+                    priority = self._calculate_priority_with_hallucination(
+                        confidence_score=confidence_score,
+                        risk_level=verification.risk_level,
+                    )
+                    return False, priority, f"risk_{verification.risk_level.value}"
+                except Exception as e:
+                    logger.warning(
+                        f"Hallucination detection failed for entity {entity_id}: {e}"
+                    )
+                    return (
+                        False,
+                        self._calculate_priority(int(confidence_score * 100)),
+                        "confidence_based",
+                    )
+
+        return (
+            False,
+            self._calculate_priority(int(confidence_score * 100)),
+            "confidence_based",
+        )
+
+    def _calculate_priority_with_hallucination(
+        self, confidence_score: float, risk_level: RiskLevel
+    ) -> int:
+        """Calculate priority (1-10) based on confidence and hallucination risk."""
+        risk_weights = {
+            RiskLevel.LOW: 0.2,
+            RiskLevel.MEDIUM: 0.5,
+            RiskLevel.HIGH: 0.8,
+            RiskLevel.CRITICAL: 1.0,
+        }
+        hallucination_factor = risk_weights.get(risk_level, 0.5)
+        confidence_factor = 1 - confidence_score
+
+        priority_score = (confidence_factor * 0.4) + (hallucination_factor * 0.6)
+        return min(10, max(1, int(priority_score * 10) + 1))

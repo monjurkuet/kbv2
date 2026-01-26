@@ -17,7 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from knowledge_base.common.aip193_middleware import AIP193ResponseMiddleware
 from knowledge_base.common.error_handlers import setup_exception_handlers
-from knowledge_base import query_api, review_api, graph_api, document_api, mcp_server
+from knowledge_base import (
+    query_api,
+    review_api,
+    graph_api,
+    document_api,
+    mcp_server,
+    schema_api,
+)
 
 
 logging.basicConfig(
@@ -107,6 +114,7 @@ app.include_router(query_api.router, tags=["query"])
 app.include_router(review_api.router, tags=["review"])
 app.include_router(graph_api.router, tags=["graphs"])
 app.include_router(document_api.router, tags=["documents"])
+app.include_router(schema_api.router, tags=["schemas"])
 
 from knowledge_base.mcp_server import kbv2_protocol
 
@@ -183,6 +191,329 @@ async def startup_event():
 
         await kbv2_protocol.initialize()
         logger.info("MCP server initialized")
+
+        from knowledge_base.intelligence import (
+            SchemaRegistry,
+            EntityTypeDef,
+            DomainAttribute,
+            InheritanceType,
+        )
+        from knowledge_base.common.dependencies import get_session_factory
+
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            registry = SchemaRegistry(db)
+            existing = await registry.list_schemas()
+
+            if not existing:
+                logger.info("Initializing domain schemas...")
+
+                DOMAIN_CONFIGS = [
+                    {
+                        "domain_name": "GENERAL",
+                        "domain_display_name": "General Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="NamedEntity",
+                                parent_type="OTHER",
+                                attributes={},
+                            )
+                        ],
+                        "parent_domain_name": None,
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "TECHNOLOGY",
+                        "domain_display_name": "Technology Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Software",
+                                parent_type="PRODUCT",
+                                attributes={
+                                    "version": DomainAttribute(
+                                        name="version", attribute_type="str"
+                                    ),
+                                    "license": DomainAttribute(
+                                        name="license", attribute_type="str"
+                                    ),
+                                    "programming_language": DomainAttribute(
+                                        name="programming_language",
+                                        attribute_type="List[str]",
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="API",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "endpoint": DomainAttribute(
+                                        name="endpoint", attribute_type="str"
+                                    ),
+                                    "method": DomainAttribute(
+                                        name="method", attribute_type="str"
+                                    ),
+                                    "status": DomainAttribute(
+                                        name="status", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="Framework",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "language": DomainAttribute(
+                                        name="language", attribute_type="str"
+                                    ),
+                                    "version": DomainAttribute(
+                                        name="version", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "FINANCIAL",
+                        "domain_display_name": "Financial Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Company",
+                                parent_type="ORGANIZATION",
+                                attributes={
+                                    "ticker_symbol": DomainAttribute(
+                                        name="ticker_symbol", attribute_type="str"
+                                    ),
+                                    "market_cap": DomainAttribute(
+                                        name="market_cap", attribute_type="float"
+                                    ),
+                                    "stock_exchange": DomainAttribute(
+                                        name="stock_exchange", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="FinancialInstrument",
+                                parent_type="PRODUCT",
+                                attributes={
+                                    "isin": DomainAttribute(
+                                        name="isin", attribute_type="str"
+                                    ),
+                                    "currency": DomainAttribute(
+                                        name="currency", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "MEDICAL",
+                        "domain_display_name": "Medical Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Drug",
+                                parent_type="PRODUCT",
+                                attributes={
+                                    "active_ingredients": DomainAttribute(
+                                        name="active_ingredients",
+                                        attribute_type="List[str]",
+                                    ),
+                                    "dosage": DomainAttribute(
+                                        name="dosage", attribute_type="str"
+                                    ),
+                                    "manufacturer": DomainAttribute(
+                                        name="manufacturer", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="Procedure",
+                                parent_type="EVENT",
+                                attributes={
+                                    "procedure_type": DomainAttribute(
+                                        name="procedure_type", attribute_type="str"
+                                    ),
+                                    "outcome": DomainAttribute(
+                                        name="outcome", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "LEGAL",
+                        "domain_display_name": "Legal Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Contract",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "parties": DomainAttribute(
+                                        name="parties", attribute_type="List[str]"
+                                    ),
+                                    "effective_date": DomainAttribute(
+                                        name="effective_date", attribute_type="datetime"
+                                    ),
+                                    "expiration_date": DomainAttribute(
+                                        name="expiration_date",
+                                        attribute_type="datetime",
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="Court",
+                                parent_type="ORGANIZATION",
+                                attributes={
+                                    "jurisdiction": DomainAttribute(
+                                        name="jurisdiction", attribute_type="str"
+                                    ),
+                                    "level": DomainAttribute(
+                                        name="level", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "HEALTHCARE",
+                        "domain_display_name": "Healthcare Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="HealthcareProvider",
+                                parent_type="ORGANIZATION",
+                                attributes={
+                                    "specialty": DomainAttribute(
+                                        name="specialty", attribute_type="str"
+                                    ),
+                                    "accreditation": DomainAttribute(
+                                        name="accreditation", attribute_type="List[str]"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="InsurancePlan",
+                                parent_type="PRODUCT",
+                                attributes={
+                                    "coverage_type": DomainAttribute(
+                                        name="coverage_type", attribute_type="str"
+                                    ),
+                                    "premium": DomainAttribute(
+                                        name="premium", attribute_type="float"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "ACADEMIC",
+                        "domain_display_name": "Academic Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Publication",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "title": DomainAttribute(
+                                        name="title", attribute_type="str"
+                                    ),
+                                    "authors": DomainAttribute(
+                                        name="authors", attribute_type="List[str]"
+                                    ),
+                                    "publication_date": DomainAttribute(
+                                        name="publication_date",
+                                        attribute_type="datetime",
+                                    ),
+                                    "venue": DomainAttribute(
+                                        name="venue", attribute_type="str"
+                                    ),
+                                    "citation_count": DomainAttribute(
+                                        name="citation_count", attribute_type="int"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="ResearchField",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "discipline": DomainAttribute(
+                                        name="discipline", attribute_type="str"
+                                    ),
+                                    "subdisciplines": DomainAttribute(
+                                        name="subdisciplines",
+                                        attribute_type="List[str]",
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                    {
+                        "domain_name": "SCIENTIFIC",
+                        "domain_display_name": "Scientific Domain",
+                        "entity_types": [
+                            EntityTypeDef(
+                                type_name="Theory",
+                                parent_type="CONCEPT",
+                                attributes={
+                                    "formulated_by": DomainAttribute(
+                                        name="formulated_by", attribute_type="str"
+                                    ),
+                                    "year_proposed": DomainAttribute(
+                                        name="year_proposed", attribute_type="int"
+                                    ),
+                                    "status": DomainAttribute(
+                                        name="status", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                            EntityTypeDef(
+                                type_name="Experiment",
+                                parent_type="EVENT",
+                                attributes={
+                                    "hypothesis": DomainAttribute(
+                                        name="hypothesis", attribute_type="str"
+                                    ),
+                                    "methodology": DomainAttribute(
+                                        name="methodology", attribute_type="str"
+                                    ),
+                                    "results": DomainAttribute(
+                                        name="results", attribute_type="str"
+                                    ),
+                                },
+                            ),
+                        ],
+                        "parent_domain_name": "GENERAL",
+                        "inheritance_type": InheritanceType.EXTENDS,
+                    },
+                ]
+
+                from knowledge_base.intelligence.v1.domain_schema_service import (
+                    DomainSchemaCreate,
+                    DomainLevel,
+                )
+
+                for config in DOMAIN_CONFIGS:
+                    schema = DomainSchemaCreate(
+                        domain_name=config["domain_name"],
+                        domain_display_name=config["domain_display_name"],
+                        entity_types=config["entity_types"],
+                        parent_domain_name=config["parent_domain_name"],
+                        inheritance_type=config["inheritance_type"],
+                        domain_level=DomainLevel.PRIMARY,
+                    )
+                    await registry.register(schema)
+
+                logger.info(f"Initialized {len(DOMAIN_CONFIGS)} domain schemas")
+            else:
+                logger.info(f"Found {len(existing)} existing domain schemas")
 
     except Exception as e:
         logger.error(f"Error during startup: {e}", exc_info=True)

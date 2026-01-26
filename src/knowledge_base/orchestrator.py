@@ -4,11 +4,28 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List, Tuple
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.common.gateway import GatewayClient, EnhancedGateway
+from knowledge_base.intelligence.v1.multi_agent_extractor import (
+    EntityExtractionManager,
+    ExtractionQualityScore,
+    ExtractedEntity,
+)
+from knowledge_base.intelligence.v1.hallucination_detector import (
+    HallucinationDetector,
+    EntityVerification,
+)
+from knowledge_base.intelligence.v1.cross_domain_detector import (
+    CrossDomainDetector,
+)
+from knowledge_base.intelligence.v1.hallucination_detector import (
+    HallucinationDetector,
+    EntityVerification,
+    RiskLevel,
+)
 from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
 from knowledge_base.ingestion.v1.gleaning_service import (
     ExtractionResult,
@@ -196,6 +213,9 @@ class IngestionOrchestrator:
         self._clustering_service: ClusteringService | None = None
         self._resolution_agent: ResolutionAgent | None = None
         self._synthesis_agent: SynthesisAgent | None = None
+        self._extraction_manager: EntityExtractionManager | None = None
+        self._hallucination_detector: HallucinationDetector | None = None
+        self._cross_domain_detector: CrossDomainDetector | None = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -203,12 +223,19 @@ class IngestionOrchestrator:
         self._gateway = GatewayClient()
         self._embedding_client = EmbeddingClient()
         self._vector_store = VectorStore()
+        self._graph_store = GraphStore()
         self._gleaning_service = GleaningService(self._gateway)
         self._clustering_service = ClusteringService()
         self._resolution_agent = ResolutionAgent(
             gateway=self._gateway, vector_store=self._vector_store
         )
         self._synthesis_agent = SynthesisAgent(gateway=self._gateway)
+        self._extraction_manager = None
+        self._hallucination_detector = HallucinationDetector()
+        self._cross_domain_detector = CrossDomainDetector()
+
+        await self._vector_store.initialize()
+        logger.info("IngestionOrchestrator initialized successfully")
 
         await self._vector_store.initialize()
         logger.info("IngestionOrchestrator initialized successfully")
@@ -343,11 +370,16 @@ class IngestionOrchestrator:
 
             return document
 
-    async def _extract_knowledge(self, document: Document) -> Document:
+    async def _extract_knowledge(
+        self,
+        document: Document,
+        use_multi_agent: bool = True,
+    ) -> Document:
         """Extract entities, edges, and temporal claims.
 
         Args:
             document: Document record.
+            use_multi_agent: If True, try multi-agent first, fallback to gleaning.
 
         Returns:
             Updated document.
@@ -361,112 +393,171 @@ class IngestionOrchestrator:
                 )
                 chunks = chunk_result.scalars().all()
 
-                # Process each chunk
-                for chunk in chunks:
+                multi_agent_success = False
+                quality_score = None
+
+                if use_multi_agent:
                     try:
-                        # Extract entities from chunk
-                        # Convert Column[str] to str for extraction
-                        chunk_text = (
-                            str(chunk.text)
-                            if hasattr(chunk.text, "value")
-                            else chunk.text
-                        )
-                        extraction = await self._gleaning_service.extract(chunk_text)
-
-                        # Create Entity objects
-                        # Convert Column[UUID] to UUID for entity creation
-                        chunk_uuid = (
-                            chunk.id
-                            if isinstance(chunk.id, UUID)
-                            else UUID(str(chunk.id))
-                        )
-                        entities = self._create_entities_from_extraction(
-                            extraction, chunk_uuid
+                        (
+                            entities,
+                            edges,
+                            quality_score,
+                            verifications,
+                        ) = await self._extract_entities_multi_agent(
+                            document=document,
+                            content_text="",
+                            domain=self._determine_domain(document),
                         )
 
-                        # Track successfully inserted entities
-                        inserted_entity_ids: set[UUID] = set()
+                        if quality_score and quality_score.overall_score >= 0.5:
+                            multi_agent_success = True
 
-                        # Insert entities with conflict handling
-                        for entity in entities:
-                            try:
-                                # Check if entity with this URI already exists
-                                existing_entity = None
-                                if getattr(entity, "uri", None) and isinstance(
-                                    getattr(entity, "uri", None), str
+                            for entity in entities:
+                                session.add(entity)
+                            await session.flush()
+
+                            for edge in edges:
+                                if (
+                                    edge.source_id
+                                    and edge.target_id
+                                    and edge.source_id != edge.target_id
                                 ):
-                                    result = await session.execute(
-                                        select(Entity).where(Entity.uri == entity.uri)
-                                    )
-                                    existing_entity = result.scalar_one_or_none()
+                                    session.add(edge)
 
-                                if existing_entity:
-                                    # Use existing entity ID
-                                    inserted_entity_ids.add(existing_entity.id)
-                                    # Update the local entity object to use existing ID for edge creation
-                                    entity.id = existing_entity.id
-                                else:
-                                    # New entity - add it
-                                    session.add(entity)
-                                    await (
-                                        session.flush()
-                                    )  # This may still fail with unique constraint
-                                    inserted_entity_ids.add(entity.id)
-
-                            except Exception:
-                                pass
-
-                        # Handle race conditions by querying for existing entities
-                        if len(inserted_entity_ids) < len(entities):
-                            existing_entities = await session.execute(
-                                select(Entity.id).where(
-                                    Entity.name.in_(
-                                        [
-                                            e.name
-                                            for e in entities
-                                            if e.id not in inserted_entity_ids
-                                        ]
-                                    )
-                                )
+                            obs.log_metric(
+                                "multi_agent_extraction_quality",
+                                quality_score.overall_score,
+                                document_id=str(document.id),
                             )
-                            for row in existing_entities.scalars():
-                                inserted_entity_ids.add(row)
+                            obs.log_metric(
+                                "entities_extracted_multi_agent",
+                                len(entities),
+                                document_id=str(document.id),
+                            )
+                            obs.log_metric(
+                                "edges_extracted_multi_agent",
+                                len(edges),
+                                document_id=str(document.id),
+                            )
 
-                        # Create ChunkEntity relationships only for successfully inserted entities
-                        for entity in entities:
-                            if entity.id in inserted_entity_ids:
-                                chunk_entity = ChunkEntity(
-                                    chunk_id=chunk.id, entity_id=entity.id
-                                )
-                                session.add(chunk_entity)
+                            if verifications:
+                                for verification in verifications:
+                                    if (
+                                        verification.is_hallucinated
+                                        or verification.risk_level
+                                        in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+                                    ):
+                                        await self._route_to_review(
+                                            [verification], document, ""
+                                        )
 
-                        # Create edges
-                        edges = self._create_edges_from_extraction(extraction, entities)
-                        for edge in edges:
-                            # Only add edges between entities that were successfully inserted
-                            if (
-                                edge.source_id in inserted_entity_ids
-                                and edge.target_id in inserted_entity_ids
-                            ):
-                                session.add(edge)
-
+                            logger.info(
+                                f"Multi-agent extraction succeeded with quality score: {quality_score.overall_score}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Multi-agent extraction quality score too low ({quality_score.overall_score if quality_score else 'N/A'}), falling back to gleaning"
+                            )
                     except Exception as e:
-                        logger.error(f"Failed to process chunk {chunk.id}: {str(e)}")
-                        continue
+                        logger.warning(
+                            f"Multi-agent extraction failed, falling back to gleaning: {e}"
+                        )
+
+                if not multi_agent_success:
+                    for chunk in chunks:
+                        try:
+                            chunk_text = (
+                                str(chunk.text)
+                                if hasattr(chunk.text, "value")
+                                else chunk.text
+                            )
+                            extraction = await self._gleaning_service.extract(
+                                chunk_text
+                            )
+
+                            chunk_uuid = (
+                                chunk.id
+                                if isinstance(chunk.id, UUID)
+                                else UUID(str(chunk.id))
+                            )
+                            entities = self._create_entities_from_extraction(
+                                extraction, chunk_uuid
+                            )
+
+                            inserted_entity_ids: set[UUID] = set()
+
+                            for entity in entities:
+                                try:
+                                    existing_entity = None
+                                    if getattr(entity, "uri", None) and isinstance(
+                                        getattr(entity, "uri", None), str
+                                    ):
+                                        result = await session.execute(
+                                            select(Entity).where(
+                                                Entity.uri == entity.uri
+                                            )
+                                        )
+                                        existing_entity = result.scalar_one_or_none()
+
+                                    if existing_entity:
+                                        inserted_entity_ids.add(existing_entity.id)
+                                        entity.id = existing_entity.id
+                                    else:
+                                        session.add(entity)
+                                        await session.flush()
+                                        inserted_entity_ids.add(entity.id)
+
+                                except Exception:
+                                    pass
+
+                            if len(inserted_entity_ids) < len(entities):
+                                existing_entities = await session.execute(
+                                    select(Entity.id).where(
+                                        Entity.name.in_(
+                                            [
+                                                e.name
+                                                for e in entities
+                                                if e.id not in inserted_entity_ids
+                                            ]
+                                        )
+                                    )
+                                )
+                                for row in existing_entities.scalars():
+                                    inserted_entity_ids.add(row)
+
+                            for entity in entities:
+                                if entity.id in inserted_entity_ids:
+                                    chunk_entity = ChunkEntity(
+                                        chunk_id=chunk.id, entity_id=entity.id
+                                    )
+                                    session.add(chunk_entity)
+
+                            edges = self._create_edges_from_extraction(
+                                extraction, entities
+                            )
+                            for edge in edges:
+                                if (
+                                    edge.source_id in inserted_entity_ids
+                                    and edge.target_id in inserted_entity_ids
+                                ):
+                                    session.add(edge)
+
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to process chunk {chunk.id}: {str(e)}"
+                            )
+                            continue
 
                 await session.commit()
 
-                # Update document status using session to ensure proper attribute assignment
                 doc_in_session = await session.get(Document, document.id)
                 if doc_in_session:
                     doc_in_session.status = "extracted"
                     await session.commit()
-                    # Refresh the local document object from session
                     refreshed_doc = await session.get(Document, document.id)
                     if refreshed_doc:
                         document = refreshed_doc
 
-                # Log metrics
                 obs.log_metric(
                     "chunks_processed", len(chunks), document_id=str(document.id)
                 )
@@ -935,6 +1026,194 @@ class IngestionOrchestrator:
             **kwargs,
         }
         self._send_progress(progress_data)
+
+    async def _ensure_extraction_manager(self) -> EntityExtractionManager:
+        """Ensure extraction manager is initialized."""
+        if self._extraction_manager is None:
+            from knowledge_base.persistence.v1.graph_store import GraphStore
+
+            async with self._vector_store.get_session() as session:
+                graph_store = GraphStore(session)
+                self._extraction_manager = EntityExtractionManager(
+                    gateway=self._gateway,
+                    graph_store=graph_store,
+                    vector_store=self._vector_store,
+                )
+        return self._extraction_manager
+
+    async def _extract_entities_multi_agent(
+        self,
+        document: Document,
+        content_text: str,
+        domain: str,
+    ) -> Tuple[
+        List[Entity], List[Edge], ExtractionQualityScore, List[EntityVerification]
+    ]:
+        """Extract entities using multi-agent system with quality verification."""
+        try:
+            extraction_manager = await self._ensure_extraction_manager()
+
+            async with self._vector_store.get_session() as session:
+                chunk_result = await session.execute(
+                    select(Chunk).where(Chunk.document_id == document.id)
+                )
+                chunks = chunk_result.scalars().all()
+
+            if not chunks:
+                return (
+                    [],
+                    [],
+                    ExtractionQualityScore(
+                        overall_score=0.0,
+                        entity_quality=0.0,
+                        relationship_quality=0.0,
+                        coherence_score=0.0,
+                        quality_level="failed",
+                        feedback="No chunks found for document",
+                    ),
+                    [],
+                )
+
+            (
+                extracted_entities,
+                quality_score,
+            ) = await extraction_manager.extract_with_evaluation(
+                list(chunks), document.id
+            )
+
+            entities, edges = self._convert_extraction_to_entities(
+                extracted_entities, chunks
+            )
+
+            verifications = []
+            if self._hallucination_detector and entities:
+                for entity in entities:
+                    entity_dict = {
+                        "name": entity.name,
+                        "type": entity.entity_type,
+                        "attributes": entity.properties or {},
+                        "context": entity.source_text or "",
+                    }
+                    verification = await self._hallucination_detector.verify_entity(
+                        entity_name=entity.name,
+                        entity_type=entity.entity_type or "UNKNOWN",
+                        attributes=entity.properties or {},
+                        context=entity.source_text or "",
+                    )
+                    verifications.append(verification)
+
+            return entities, edges, quality_score, verifications
+
+        except Exception as e:
+            logger.error(f"Multi-agent extraction failed: {str(e)}")
+            return (
+                [],
+                [],
+                ExtractionQualityScore(
+                    overall_score=0.0,
+                    entity_quality=0.0,
+                    relationship_quality=0.0,
+                    coherence_score=0.0,
+                    quality_level="failed",
+                    feedback=f"Extraction failed: {str(e)}",
+                ),
+                [],
+            )
+
+    def _convert_extraction_to_entities(
+        self,
+        extracted_entities: List[ExtractedEntity],
+        chunks: List[Chunk],
+    ) -> Tuple[List[Entity], List[Edge]]:
+        """Convert multi-agent extraction result to persistence entities."""
+        entities = []
+        edges = []
+
+        chunk_map = {str(c.id): c for c in chunks}
+        entity_map = {}
+
+        for extracted in extracted_entities:
+            normalized_name = re.sub(
+                r"[^\w\s-]", "", extracted.name.lower().replace(" ", "_")
+            )
+            uri = f"entity:{quote(normalized_name)}"
+
+            entity = Entity(
+                id=extracted.id if extracted.id else uuid4(),
+                name=extracted.name,
+                entity_type=extracted.entity_type,
+                description=extracted.description,
+                properties=extracted.properties,
+                confidence=extracted.confidence,
+                uri=uri,
+                source_text=extracted.source_text,
+                domain=None,
+            )
+            entities.append(entity)
+            entity_map[extracted.id] = entity
+
+        for extracted in extracted_entities:
+            for linked_id in extracted.linked_entities:
+                if linked_id in entity_map:
+                    source = entity_map.get(extracted.id)
+                    target = entity_map.get(linked_id)
+                    if source and target and source.id != target.id:
+                        edge = Edge(
+                            id=uuid4(),
+                            source_id=source.id,
+                            target_id=target.id,
+                            edge_type=EdgeType.RELATED_TO,
+                            properties={},
+                            confidence=extracted.confidence,
+                            provenance="multi_agent_extraction",
+                            source_text=extracted.source_text,
+                        )
+                        edges.append(edge)
+
+        return entities, edges
+
+    async def _route_to_review(
+        self,
+        verifications: List[EntityVerification],
+        document: Document,
+        source_text: str,
+    ) -> None:
+        """Route low-quality entities to review queue."""
+        for verification in verifications:
+            if verification.is_hallucinated or verification.risk_level in (
+                RiskLevel.HIGH,
+                RiskLevel.CRITICAL,
+            ):
+                priority = 9 if verification.risk_level == RiskLevel.CRITICAL else 7
+
+                review_item = ReviewQueue(
+                    id=uuid4(),
+                    item_type="entity_verification",
+                    document_id=document.id,
+                    confidence_score=verification.overall_confidence,
+                    grounding_quote=", ".join(verification.hallucination_reasons),
+                    source_text=source_text,
+                    status=ReviewStatus.PENDING,
+                    priority=priority,
+                    metadata={
+                        "entity_name": verification.entity_name,
+                        "entity_type": verification.entity_type,
+                        "risk_level": verification.risk_level.value,
+                        "unsupported_count": verification.unsupported_count,
+                        "total_attributes": verification.total_attributes,
+                    },
+                )
+
+                async with self._vector_store.get_session() as session:
+                    session.add(review_item)
+                    await session.commit()
+
+                self._observability.log_metric(
+                    "review_queue_items_added",
+                    1,
+                    document_id=str(document.id),
+                    priority=priority,
+                )
 
     async def process_document(
         self,

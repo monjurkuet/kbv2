@@ -1,11 +1,18 @@
 """Local LLM Gateway Client."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Type
 
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from knowledge_base.clients import (
+    create_llm_client,
+    FewShotExample,
+    PromptingStrategy,
+    LLMClient,
+)
 
 
 class GatewayConfig(BaseSettings):
@@ -191,3 +198,105 @@ class GatewayClient:
             exc_tb: Exception traceback.
         """
         await self.close()
+
+
+class EnhancedGateway(GatewayClient):
+    """Enhanced gateway client with advanced LLM prompting capabilities."""
+
+    def __init__(self, config: GatewayConfig | None = None) -> None:
+        """Initialize enhanced gateway.
+
+        Args:
+            config: Gateway configuration. If None, loads from environment.
+        """
+        super().__init__(config)
+        self._llm_client: LLMClient | None = None
+
+    async def _get_llm_client(self) -> LLMClient:
+        """Get or create LLM client.
+
+        Returns:
+            LLM client instance.
+        """
+        if self._llm_client is None:
+            self._llm_client = await create_llm_client(
+                url=self._config.url,
+                api_key=self._config.api_key,
+                model=self._config.model,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
+            )
+        return self._llm_client
+
+    async def extract_with_reasoning(self, prompt: str) -> dict[str, Any]:
+        """Use Chain-of-Thought for complex extractions.
+
+        Args:
+            prompt: Extraction prompt.
+
+        Returns:
+            Dictionary with answer and reasoning steps.
+        """
+        client = await self._get_llm_client()
+        answer, steps = await client.complete_with_cot_steps(prompt)
+        return {"answer": answer, "steps": [s.model_dump() for s in steps]}
+
+    async def extract_with_cod(self, prompt: str) -> dict[str, Any]:
+        """Use Chain-of-Draft for token-efficient extraction.
+
+        Args:
+            prompt: Extraction prompt.
+
+        Returns:
+            Dictionary with answer and draft steps.
+        """
+        client = await self._get_llm_client()
+        answer, steps = await client.complete_with_cod_steps(prompt)
+        return {"answer": answer, "steps": [s.model_dump() for s in steps]}
+
+    async def extract_structured(
+        self, prompt: str, schema: Type[BaseModel]
+    ) -> BaseModel:
+        """Extract with structured JSON output.
+
+        Args:
+            prompt: Extraction prompt.
+            schema: Pydantic schema for response.
+
+        Returns:
+            Parsed instance of schema.
+        """
+        client = await self._get_llm_client()
+        json_data = await client.complete_json(
+            prompt=prompt,
+            strategy=PromptingStrategy.STANDARD,
+            json_mode=True,
+        )
+        return schema.model_validate(json_data)
+
+    async def extract_few_shot(
+        self, prompt: str, examples: list[FewShotExample]
+    ) -> dict[str, Any]:
+        """Extract with few-shot examples.
+
+        Args:
+            prompt: Extraction prompt.
+            examples: Few-shot examples.
+
+        Returns:
+            Dictionary with extracted content.
+        """
+        client = await self._get_llm_client()
+        content = await client.complete(
+            prompt=prompt,
+            strategy=PromptingStrategy.FEW_SHOT,
+            few_shot_examples=examples,
+        )
+        return {"content": content}
+
+    async def close(self) -> None:
+        """Close HTTP clients."""
+        if self._llm_client:
+            await self._llm_client.close()
+            self._llm_client = None
+        await super().close()
