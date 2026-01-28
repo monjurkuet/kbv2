@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KBV2 Knowledge Base - Windows XP Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tahoma:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* Windows XP Theme Colors */
+        :root {
+            --xp-blue: #0058e4;
+            --xp-blue-dark: #0046b5;
+            --xp-blue-light: #3a6ee8;
+            --xp-silver: #c0c0c0;
+            --xp-silver-dark: #808080;
+            --xp-silver-light: #e0e0e0;
+            --xp-green: #22aa22;
+            --xp-red: #e42222;
+            --start-green: #22aa22;
+        }
+
+        body {
+            font-family: 'Tahoma', sans-serif;
+            background: url('tdcosta_xp/images/Wallpapers/Bliss.jpg') no-repeat center center fixed;
+            background-size: cover;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .window {
+            background: #ECE9D8;
+            border: 1px solid #00138C;
+            border-radius: 3px 3px 0 0;
+            box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .window.dragging {
+            opacity: 0.8;
+            cursor: move !important;
+        }
+
+        .window.resizing {
+            cursor: se-resize !important;
+        }
+
+        .window.maximized {
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+        }
+
+        .window.maximized .titlebar {
+            border-radius: 0 !important;
+        }
+
+        /* BSOD */
+        .bsod {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #0000aa;
+            color: #ffffff;
+            font-family: 'Lucida Console', monospace;
+            z-index: 99999;
+            padding: 50px;
+            font-size: 14px;
+            line-height: 1.5;
+            cursor: none;
+        }
+
+        .titlebar {
+            background: linear-gradient(to bottom, #0058EE 0%, #3593FF 4%, #288EFF 18%, #127DFF 20%, #0369FC 39%, #0262EE 40%, #0057E5 100%);
+            color: white;
+            font-weight: bold;
+            font-family: 'Tahoma', sans-serif;
+            text-shadow: 1px 1px #0f305e;
+            padding: 3px 5px 3px 5px;
+            border-radius: 3px 3px 0 0;
+            height: 30px;
+        }
+
+        .titlebar.inactive {
+            background: linear-gradient(to bottom, #7697CE 0%, #7697CE 100%);
+        }
+
+        .button {
+            background: linear-gradient(to bottom, #e0e0e0 0%, #c0c0c0 100%);
+            border: 2px solid;
+            border-color: #ffffff #808080 #808080 #ffffff;
+            box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            transition: all 0.1s;
+        }
+
+        .button:active {
+            border-color: #808080 #ffffff #ffffff #808080;
+            box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .start-button:hover {
+            background-position: 0 50%;
+        }
+
+        /* Taskbar */
+        .taskbar {
+            background-image: url('tdcosta_xp/images/Themes/Blue/TaskbarBackground.png');
+            background-repeat: repeat-x;
+            background-position: 0 0;
+            background-size: auto 100%;
+            height: 30px;
+            border: none;
+            box-shadow: none;
+            display: flex;
+            align-items: center;
+            padding: 0;
+            z-index: 20000;
+        }
+
+        .start-button-container {
+            position: relative;
+            width: 100px;
+            height: 30px;
+            overflow: visible;
+            cursor: pointer;
+        }
+
+        .start-button {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('tdcosta_xp/images/Themes/Blue/StartButton.png');
+            background-size: cover;
+            /* Approximate, since it's a sprite map */
+            background-position: 0 0;
+            /* Normal state */
+            border: none;
+            box-shadow: none;
+            border-radius: 0;
+            display: flex;
+            align-items: center;
+            padding-left: 30px;
+            padding-bottom: 3px;
+            font-family: 'Tahoma', sans-serif;
+            font-style: italic;
+            font-weight: bold;
+            font-size: 14px;
+            color: white;
+            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+            transition: none;
+        }
+
+        /* Sprite mapping for Start Button states based on CSS analysis */
+        /* The original CSS uses complex multi-div backgrounds. We will approximate with simple sprite switching for now or reuse the complex structure if possible. */
+        /* Given the complexity, let's try to mimic the visual result with the single image provided */
+
+        .start-button:hover {
+            background-position: 0 -30px;
+            /* Guessing offset based on typical sprites */
+        }
+
+        .start-button:active,
+        .start-button.active {
+            background-position: 0 -60px;
+            /* Guessing offset */
+        }
+
+        /* Let's refine the background position based on the sprite image typically containing 3 vertical states */
+        /* Usually: Normal, Hover, Pressed */
+        .start-button {
+            background-size: 100% 300%;
+            /* 3 states vertical */
+            background-position: 0 0;
+        }
+
+        .start-button:hover {
+            background-position: 0 50%;
+        }
+
+        .start-button:active {
+            background-position: 0 100%;
+        }
+
+        .status-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .status-connected {
+            background: linear-gradient(to bottom, #22ff22 0%, #00aa00 100%);
+        }
+
+        .status-disconnected {
+            background: linear-gradient(to bottom, #ff2222 0%, #aa0000 100%);
+        }
+
+        .status-connecting {
+            background: linear-gradient(to bottom, #ffaa22 0%, #aa7700 100%);
+        }
+
+        .console-output {
+            background: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #c0c0c0 #808080;
+        }
+
+        .console-output::-webkit-scrollbar {
+            width: 16px;
+        }
+
+        .console-output::-webkit-scrollbar-track {
+            background: #808080;
+        }
+
+        .console-output::-webkit-scrollbar-thumb {
+            background: linear-gradient(to right, #e0e0e0 0%, #c0c0c0 100%);
+            border: 1px solid #808080;
+        }
+
+        @keyframes blink {
+
+            0%,
+            50% {
+                opacity: 1;
+            }
+
+            51%,
+            100% {
+                opacity: 0;
+            }
+        }
+
+        .cursor {
+            animation: blink 1s infinite;
+        }
+
+        .window-content {
+            background: #ECE9D8;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #fff;
+            border-top: none;
+        }
+
+        .icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.5));
+        }
+
+        .start-icon-img {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            margin-right: 8px;
+        }
+
+        .taskbar-icon-img {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            margin-right: 4px;
+        }
+
+        .window-icon-img {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            margin-right: 4px;
+        }
+
+        /* Resize handle */
+        .resize-handle {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 16px;
+            height: 16px;
+            cursor: se-resize;
+            background: linear-gradient(135deg, transparent 50%, #a0a0a0 50%);
+            z-index: 1000;
+        }
+
+        .resize-handle:hover {
+            background: linear-gradient(135deg, transparent 50%, #707070 50%);
+        }
+
+        .resize-handle::before {
+            content: '';
+            position: absolute;
+            bottom: 3px;
+            right: 3px;
+            width: 0;
+            height: 0;
+            border-style: solid;
+            border-width: 0 0 8px 8px;
+            border-color: transparent transparent #e0e0e0 transparent;
+            pointer-events: none;
+        }
+
+        /* Window state transitions */
+        .window {
+            transition: none;
+        }
+
+        /* Maximized state */
+        .window.maximized {
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+        }
+
+        .window.maximized .titlebar {
+            border-radius: 0 !important;
+        }
+
+        /* Start Menu */
+        .start-menu {
+            position: fixed;
+            bottom: 40px;
+            left: 0;
+            width: 380px;
+            background: #ffffff;
+            border: 1px solid #000;
+            border-radius: 5px 5px 0 0;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .start-header {
+            background: linear-gradient(to bottom, #1571de 0%, #1571de 100%);
+            padding: 10px;
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            border-bottom: 2px solid #e5ad04;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: #fff;
+            border-radius: 3px;
+            border: 2px solid #fff;
+            margin-right: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #000;
+        }
+
+        .start-body {
+            display: flex;
+            height: 380px;
+        }
+
+        .start-left {
+            width: 50%;
+            background: #fff;
+            padding: 5px;
+            border-right: 1px solid #d3d3d3;
+        }
+
+        .start-right {
+            width: 50%;
+            background: #d3e5fa;
+            padding: 5px;
+            border-left: 1px solid #9bbadd;
+        }
+
+        .start-item {
+            padding: 5px 10px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            margin-bottom: 2px;
+            color: #333;
+            font-size: 11px;
+        }
+
+        .start-item:hover {
+            background-color: #316ac5;
+            color: white;
+        }
+
+        .start-item-right {
+            padding: 5px 10px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            margin-bottom: 2px;
+            color: #333;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .start-item-right:hover {
+            background-color: #316ac5;
+            color: white;
+        }
+
+        .start-footer {
+            background: linear-gradient(to top, #0058e4 0%, #3a6ee8 100%);
+            padding: 8px 10px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            color: white;
+            border-top: 1px solid #fff;
+        }
+    </style>
+</head>
+
+<body class="m-0 p-0">
+    <!-- Desktop Area -->
+    <div class="h-screen flex flex-col">
+        <!-- Desktop Icons -->
+        <div class="p-4 grid grid-cols-1 gap-4 w-24">
+            <div class="flex flex-col items-center cursor-pointer hover:bg-blue-500 hover:bg-opacity-20 p-2 rounded border border-transparent hover:border-blue-300 hover:border-opacity-30"
+                onclick="alert('My Computer is not available right now.')">
+                <div class="icon"><img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/My Computer.png"
+                        class="icon-img" alt="My Computer"></div>
+                <div class="text-white text-xs mt-1 font-bold drop-shadow-md text-center">My Computer</div>
+            </div>
+
+            <div class="flex flex-col items-center cursor-pointer hover:bg-blue-500 hover:bg-opacity-20 p-2 rounded border border-transparent hover:border-blue-300 hover:border-opacity-30"
+                onclick="alert('Recycle Bin is empty.')">
+                <div class="icon"><img
+                        src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Recycle Bin (empty).png"
+                        class="icon-img" alt="Recycle Bin"></div>
+                <div class="text-white text-xs mt-1 font-bold drop-shadow-md text-center">Recycle Bin</div>
+            </div>
+
+            <div class="flex flex-col items-center cursor-pointer hover:bg-blue-500 hover:bg-opacity-20 p-2 rounded border border-transparent hover:border-blue-300 hover:border-opacity-30"
+                onclick="openWindow('main')">
+                <div class="icon"><img
+                        src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Help and Support.png"
+                        class="icon-img" alt="KBV2 Client"></div>
+                <div class="text-white text-xs mt-1 font-bold drop-shadow-md text-center">KBV2 Client</div>
+            </div>
+
+            <div class="flex flex-col items-center cursor-pointer hover:bg-blue-500 hover:bg-opacity-20 p-2 rounded border border-transparent hover:border-blue-300 hover:border-opacity-30"
+                onclick="openWindow('cmd')">
+                <div class="icon"><img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Command Prompt.png"
+                        class="icon-img" alt="Command Prompt"></div>
+                <div class="text-white text-xs mt-1 font-bold drop-shadow-md text-center">Command Prompt</div>
+            </div>
+        </div>
+
+        <!-- Window -->
+        <div id="main-window" class="window absolute top-16 left-16 w-5/6 h-5/6 hidden"
+            style="z-index: 10; min-width: 400px; min-height: 300px;">
+            <!-- Title Bar -->
+            <div class="titlebar flex items-center justify-between px-2 py-1 cursor-move"
+                onmousedown="startDrag(event, 'main')">
+                <div class="flex items-center">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Help and Support.png"
+                        class="window-icon-img" alt="Icon">
+                    <span>KBV2 Knowledge Base - WebSocket Client</span>
+                </div>
+                <div class="flex">
+                    <button class="button w-5 h-4 text-xs font-bold flex items-center justify-center"
+                        onclick="minimizeWindow('main')">_</button>
+                    <button class="button w-5 h-4 text-xs font-bold ml-1 flex items-center justify-center"
+                        onclick="toggleMaximize('main')">□</button>
+                    <button class="button w-5 h-4 text-xs font-bold ml-1 flex items-center justify-center text-red-600"
+                        onclick="closeWindow('main')">✕</button>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div class="p-2 h-full">
+                <div class="window-content h-full flex flex-col">
+                    <!-- Connection Bar -->
+                    <div class="border-b border-gray-400 p-2 flex items-center">
+                        <span id="connection-status" class="status-indicator status-disconnected"></span>
+                        <span id="connection-text" class="text-sm">Disconnected</span>
+                        <button id="connect-btn" class="button px-3 py-1 text-xs ml-4"
+                            onclick="toggleConnection()">Connect</button>
+                        <button class="button px-3 py-1 text-xs ml-2" onclick="clearConsole()">Clear</button>
+                        <div class="ml-auto text-xs text-gray-600">
+                            ws://localhost:8765/ws
+                        </div>
+                    </div>
+
+                    <!-- Message Input -->
+                    <div class="border-b border-gray-400 p-2">
+                        <div class="flex gap-2">
+                            <select id="method-select" class="border border-gray-400 px-2 py-1 text-xs">
+                                <option value="ingest_document">ingest_document</option>
+                                <option value="query">query</option>
+                                <option value="health_check">health_check</option>
+                            </select>
+                            <input type="text" id="file-input" placeholder="File path (for ingest)"
+                                class="flex-1 border border-gray-400 px-2 py-1 text-xs">
+                            <button id="send-btn" class="button px-3 py-1 text-xs" onclick="sendMessage()"
+                                disabled>Send</button>
+                        </div>
+                        <div class="flex gap-2 mt-2">
+                            <input type="text" id="query-input" placeholder="Query text (for query method)"
+                                class="flex-1 border border-gray-400 px-2 py-1 text-xs">
+                        </div>
+                    </div>
+
+                    <!-- Console Output -->
+                    <div class="flex-1 p-2">
+                        <div id="console"
+                            class="console-output w-full h-full p-2 border border-gray-400 font-mono text-xs">
+                            <div>KBV2 Knowledge Base WebSocket Client v1.0</div>
+                            <div>Type: Windows XP Edition</div>
+                            <div>Ready for connection... <span class="cursor">_</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Resize handle -->
+            <div class="resize-handle" onmousedown="startResize(event, 'main')"></div>
+        </div>
+
+        <!-- Command Prompt Window -->
+        <div id="cmd-window" class="window absolute top-24 left-24 w-[600px] h-[400px] hidden"
+            style="z-index: 10; min-width: 300px; min-height: 200px;">
+            <!-- Title Bar -->
+            <div class="titlebar flex items-center justify-between px-2 py-1 cursor-move"
+                onmousedown="startDrag(event, 'cmd')">
+                <div class="flex items-center">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Command Prompt.png"
+                        class="window-icon-img" alt="Icon">
+                    <span>C:\WINDOWS\system32\cmd.exe</span>
+                </div>
+                <div class="flex">
+                    <button class="button w-5 h-4 text-xs font-bold flex items-center justify-center"
+                        onclick="minimizeWindow('cmd')">_</button>
+                    <button class="button w-5 h-4 text-xs font-bold ml-1 flex items-center justify-center"
+                        onclick="toggleMaximize('cmd')">□</button>
+                    <button class="button w-5 h-4 text-xs font-bold ml-1 flex items-center justify-center text-red-600"
+                        onclick="closeWindow('cmd')">✕</button>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div class="p-1 h-full bg-black">
+                <div
+                    class="window-content h-full flex flex-col border-none bg-black text-white font-mono text-sm p-1 overflow-y-auto">
+                    <div>Microsoft Windows XP [Version 5.1.2600]</div>
+                    <div class="mb-2">(C) Copyright 1985-2001 Microsoft Corp.</div>
+
+                    <div id="cmd-output">
+                        <div class="mb-1">C:\Documents and Settings\Administrator> <span class="cursor">_</span></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Resize handle -->
+            <div class="resize-handle" onmousedown="startResize(event, 'cmd')"></div>
+        </div>
+
+        <!-- Start Menu -->
+        <div id="start-menu" class="start-menu hidden">
+            <div class="start-header">
+                <div class="user-avatar overflow-hidden">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/User Accounts.png"
+                        class="w-full h-full object-cover">
+                </div>
+                <div class="text-lg font-bold shadow-sm">Administrator</div>
+            </div>
+            <div class="start-body">
+                <div class="start-left">
+                    <div class="font-bold text-gray-500 text-xs px-2 py-1 mb-1">Pinned</div>
+                    <div class="start-item" onclick="openWindow('main'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Help and Support.png"
+                            class="start-icon-img">
+                        <div>
+                            <div class="font-bold">KBV2 Client</div>
+                            <div class="text-gray-500 text-[9px] group-hover:text-white">Knowledge Base</div>
+                        </div>
+                    </div>
+                    <div class="start-item" onclick="alert('Internet Explorer is not installed.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Internet Explorer 6.png"
+                            class="start-icon-img">
+                        <div class="font-bold">Internet</div>
+                    </div>
+                    <div class="start-item" onclick="alert('Outlook Express is not installed.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Outlook Express.png"
+                            class="start-icon-img">
+                        <div class="font-bold">E-mail</div>
+                    </div>
+
+                    <div class="border-b border-gray-300 my-2"></div>
+
+                    <div class="start-item" onclick="alert('Program not found.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Notepad.png"
+                            class="start-icon-img">
+                        <div class="font-bold">Notepad</div>
+                    </div>
+                    <div class="start-item" onclick="openWindow('cmd'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Command Prompt.png"
+                            class="start-icon-img">
+                        <div class="font-bold">Command Prompt</div>
+                    </div>
+                </div>
+                <div class="start-right">
+                    <div class="start-item-right" onclick="alert('My Documents is empty.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/My Documents.png"
+                            class="start-icon-img"> My Documents
+                    </div>
+                    <div class="start-item-right" onclick="alert('My Pictures is empty.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/My Pictures.png"
+                            class="start-icon-img"> My Pictures
+                    </div>
+                    <div class="start-item-right" onclick="alert('My Music is empty.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/My Music.png"
+                            class="start-icon-img"> My Music
+                    </div>
+
+                    <div class="border-b border-[#9bbadd] border-white my-2 border-t"></div>
+
+                    <div class="start-item-right" onclick="alert('Open My Computer on desktop.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/My Computer.png"
+                            class="start-icon-img"> My Computer
+                    </div>
+                    <div class="start-item-right" onclick="alert('Control Panel is restricted.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Control Panel.png"
+                            class="start-icon-img"> Control Panel
+                    </div>
+
+                    <div class="border-b border-[#9bbadd] border-white my-2 border-t"></div>
+
+                    <div class="start-item-right" onclick="alert('Help is not available.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Help and Support.png"
+                            class="start-icon-img"> Help and Support
+                    </div>
+                    <div class="start-item-right" onclick="alert('Search is not available.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Search.png"
+                            class="start-icon-img"> Search
+                    </div>
+                    <div class="start-item-right" onclick="alert('Run is restricted.'); toggleStartMenu()">
+                        <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Run.png"
+                            class="start-icon-img"> Run...
+                    </div>
+                </div>
+            </div>
+            <div class="start-footer">
+                <div class="flex items-center cursor-pointer hover:underline" onclick="location.reload()">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Logout.png" class="w-6 h-6 mr-1">
+                    Log Off
+                </div>
+                <div class="flex items-center ml-4 cursor-pointer hover:underline" onclick="window.close()">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Power.png" class="w-6 h-6 mr-1">
+                    Turn Off Computer
+                </div>
+            </div>
+        </div>
+
+        <!-- Taskbar -->
+        <div class="taskbar fixed bottom-0 left-0 right-0 h-[30px] flex items-center px-0">
+            <div class="start-button-container" onclick="toggleStartMenu()" id="start-button-wrapper">
+                <button id="start-button" class="start-button">
+                    <span
+                        class="font-bold shadow-black drop-shadow-md ml-4 text-white italic text-shadow-md">start</span>
+                </button>
+            </div>
+            <div class="ml-2 flex-1 flex items-center space-x-1">
+                <div id="taskbar-item-main"
+                    class="bg-[#3c81f3] hover:bg-[#5394ff] active:bg-[#1a5ec4] text-white px-3 py-1 text-xs hidden items-center cursor-pointer rounded-sm border-t border-l border-[#6ba4ff] border-r border-b border-[#1a50a6] shadow-sm w-40 truncate select-none taskbar-item"
+                    onclick="toggleWindowFromTaskbar('main')">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Help and Support.png"
+                        class="taskbar-icon-img"> KBV2 Client
+                </div>
+                <div id="taskbar-item-cmd"
+                    class="bg-[#3c81f3] hover:bg-[#5394ff] active:bg-[#1a5ec4] text-white px-3 py-1 text-xs hidden items-center cursor-pointer rounded-sm border-t border-l border-[#6ba4ff] border-r border-b border-[#1a50a6] shadow-sm w-40 truncate select-none taskbar-item"
+                    onclick="toggleWindowFromTaskbar('cmd')">
+                    <img src="XP/Windows XP High Resolution Icon Pack/Windows XP Icons/Command Prompt.png"
+                        class="taskbar-icon-img"> Command Prompt
+                </div>
+            </div>
+            <div class="text-white text-xs">
+                <span id="clock"></span>
+            </div>
+        </div>
+        <!-- BSOD Overlay -->
+        <div id="bsod" class="bsod" onclick="location.reload()">
+            <p>A problem has been detected and Windows has been shut down to prevent damage to your computer.</p>
+            <br>
+            <p>KBV2_KERNEL_MOUNT_FAILURE</p>
+            <br>
+            <p>If this is the first time you've seen this Stop error screen, restart your computer. If this screen
+                appears again, follow these steps:</p>
+            <br>
+            <p>Check to make sure any new hardware or software is properly installed. If this is a new installation, ask
+                your hardware or software manufacturer for any Windows updates you might need.</p>
+            <br>
+            <p>If problems continue, disable or remove any newly installed hardware or software. Disable BIOS memory
+                options such as caching or shadowing. If you need to use Safe Mode to remove or disable components,
+                restart your computer, press F8 to select Advanced Startup Options, and then select Safe Mode.</p>
+            <br>
+            <p>Technical information:</p>
+            <br>
+            <p>*** STOP: 0x00000050 (0xFD3094C2, 0x00000001, 0xFBFE7617, 0x00000000)</p>
+            <br>
+            <p>*** kbv2.sys - Address FBFE7617 base at FBFE5000, DateStamp 3d6dd67c</p>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket and UI State
+        let ws = null;
+        let messageId = 0;
+        let isConnected = false;
+        let draggedWindow = null;
+        let dragOffset = { x: 0, y: 0 };
+
+        function toggleStartMenu() {
+            const menu = document.getElementById('start-menu');
+            const btn = document.getElementById('start-button');
+            menu.classList.toggle('hidden');
+
+            if (!menu.classList.contains('hidden')) {
+                // Close if clicked outside
+                const closeMenu = (e) => {
+                    if (!menu.contains(e.target) && !btn.contains(e.target)) {
+                        menu.classList.add('hidden');
+                        document.removeEventListener('mousedown', closeMenu);
+                    }
+                };
+                setTimeout(() => document.addEventListener('mousedown', closeMenu), 0);
+            }
+        }
+
+        // Windows management functions
+        function openWindow(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            const taskbarItem = document.getElementById(`taskbar-item-${id}`);
+
+            // Check if already open and just bring to front
+            if (!targetWindow.classList.contains('hidden')) {
+                bringToFront(targetWindow);
+
+                // Visual feedback that it's already open (shake effect)
+                targetWindow.style.transform = "translateX(5px)";
+                setTimeout(() => targetWindow.style.transform = "translateX(-5px)", 50);
+                setTimeout(() => targetWindow.style.transform = "translateX(5px)", 100);
+                setTimeout(() => targetWindow.style.transform = "translateX(0)", 150);
+                return;
+            }
+
+            targetWindow.classList.remove('hidden');
+            taskbarItem.classList.remove('hidden');
+            // Reset position if not set
+            if (!targetWindow.style.left && !targetWindow.style.top) {
+                // Cascading effect
+                const offset = document.querySelectorAll('.window:not(.hidden)').length * 20;
+                targetWindow.style.left = (64 + offset) + 'px';
+                targetWindow.style.top = (64 + offset) + 'px';
+                targetWindow.style.right = 'auto';
+                targetWindow.style.bottom = 'auto';
+            }
+            bringToFront(targetWindow);
+        }
+
+        function toggleWindowFromTaskbar(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            if (targetWindow.classList.contains('hidden')) {
+                targetWindow.classList.remove('hidden');
+                bringToFront(targetWindow);
+            } else {
+                // If it is the top window, minimize it
+                const windows = document.querySelectorAll('.window:not(.hidden)');
+                let maxZ = 0;
+                windows.forEach(w => {
+                    maxZ = Math.max(maxZ, parseInt(w.style.zIndex) || 10);
+                });
+
+                if (parseInt(targetWindow.style.zIndex) === maxZ) {
+                    minimizeWindow(id);
+                } else {
+                    bringToFront(targetWindow);
+                }
+            }
+        }
+
+        function closeWindow(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            const taskbarItem = document.getElementById(`taskbar-item-${id}`);
+            targetWindow.classList.add('hidden');
+            taskbarItem.classList.add('hidden');
+        }
+
+        function minimizeWindow(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            targetWindow.classList.add('hidden');
+            // Note: We do NOT hide the taskbar item when minimizing
+        }
+
+        function restoreWindow(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            targetWindow.classList.remove('hidden');
+            bringToFront(targetWindow);
+        }
+
+        function toggleMaximize(id) {
+            const targetWindow = document.getElementById(`${id}-window`);
+            const isMaximized = targetWindow.classList.contains('maximized');
+
+            if (isMaximized) {
+                // Restore to normal size
+                targetWindow.classList.remove('maximized');
+                targetWindow.classList.remove('w-full', 'h-full', 'top-0', 'left-0', 'right-0', 'bottom-0');
+                targetWindow.style.width = targetWindow.dataset.normalWidth || '400px';
+                targetWindow.style.height = targetWindow.dataset.normalHeight || '300px';
+                targetWindow.style.left = targetWindow.dataset.normalLeft || '64px';
+                targetWindow.style.top = targetWindow.dataset.normalTop || '64px';
+                targetWindow.style.right = 'auto';
+                targetWindow.style.bottom = 'auto';
+                targetWindow.style.position = 'absolute';
+            } else {
+                // Save current position and size
+                const rect = targetWindow.getBoundingClientRect();
+                targetWindow.dataset.normalLeft = targetWindow.style.left || rect.left + 'px';
+                targetWindow.dataset.normalTop = targetWindow.style.top || rect.top + 'px';
+                targetWindow.dataset.normalWidth = rect.width + 'px';
+                targetWindow.dataset.normalHeight = rect.height + 'px';
+
+                // Maximize
+                targetWindow.classList.add('maximized');
+                targetWindow.classList.add('w-full', 'h-full', 'top-0', 'left-0');
+                targetWindow.style.right = '0';
+                targetWindow.style.bottom = '0';
+                targetWindow.style.position = 'fixed';
+            }
+        }
+
+        function bringToFront(element) {
+            const windows = document.querySelectorAll('.window');
+            let maxZ = 10;
+            windows.forEach(w => {
+                if (!w.classList.contains('hidden')) {
+                    const z = parseInt(w.style.zIndex) || 10;
+                    maxZ = Math.max(maxZ, z);
+                }
+            });
+            element.style.zIndex = maxZ + 1;
+        }
+
+        function startDrag(e, windowId) {
+            // Don't drag if clicking on a button
+            if (e.target.classList.contains('button')) return;
+
+            draggedWindow = document.getElementById(`${windowId}-window`);
+            if (draggedWindow.classList.contains('maximized')) return;
+
+            const rect = draggedWindow.getBoundingClientRect();
+            dragOffset.x = e.clientX - rect.left;
+            dragOffset.y = e.clientY - rect.top;
+            bringToFront(draggedWindow);
+
+            // Add dragging class for visual feedback
+            draggedWindow.classList.add('dragging');
+
+            function drag(e) {
+                if (draggedWindow) {
+                    let newLeft = e.clientX - dragOffset.x;
+                    let newTop = e.clientY - dragOffset.y;
+
+                    // Guardrails: Prevent dragging completely off screen
+                    const windowWidth = draggedWindow.offsetWidth;
+                    const windowHeight = draggedWindow.offsetHeight;
+                    const screenWidth = window.innerWidth;
+                    const screenHeight = window.innerHeight;
+
+                    // Allow keeping at least 30px visible
+                    if (newLeft + windowWidth < 30) newLeft = 30 - windowWidth;
+                    if (newLeft > screenWidth - 30) newLeft = screenWidth - 30;
+                    if (newTop < 0) newTop = 0; // Don't allow dragging above top
+                    if (newTop > screenHeight - 30) newTop = screenHeight - 30;
+
+                    draggedWindow.style.left = newLeft + 'px';
+                    draggedWindow.style.top = newTop + 'px';
+                    draggedWindow.style.right = 'auto';
+                    draggedWindow.style.bottom = 'auto';
+                }
+            }
+
+            function stopDrag() {
+                if (draggedWindow) {
+                    draggedWindow.classList.remove('dragging');
+                }
+                draggedWindow = null;
+                document.removeEventListener('mousemove', drag);
+                document.removeEventListener('mouseup', stopDrag);
+            }
+
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+            e.preventDefault();
+        }
+
+        function startResize(e, windowId) {
+            e.stopPropagation();
+            const targetWindow = document.getElementById(`${windowId}-window`);
+            if (targetWindow.classList.contains('maximized')) return;
+
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startWidth = parseInt(document.defaultView.getComputedStyle(targetWindow).width, 10);
+            const startHeight = parseInt(document.defaultView.getComputedStyle(targetWindow).height, 10);
+            const minWidth = parseInt(document.defaultView.getComputedStyle(targetWindow).minWidth, 10) || 200;
+            const minHeight = parseInt(document.defaultView.getComputedStyle(targetWindow).minHeight, 10) || 150;
+
+            // Add resizing class for visual feedback
+            targetWindow.classList.add('resizing');
+
+            function resize(e) {
+                const newWidth = Math.max(minWidth, startWidth + e.clientX - startX);
+                const newHeight = Math.max(minHeight, startHeight + e.clientY - startY);
+                targetWindow.style.width = newWidth + 'px';
+                targetWindow.style.height = newHeight + 'px';
+            }
+
+            function stopResize() {
+                targetWindow.classList.remove('resizing');
+                document.removeEventListener('mousemove', resize);
+                document.removeEventListener('mouseup', stopResize);
+            }
+
+            document.addEventListener('mousemove', resize);
+            document.addEventListener('mouseup', stopResize);
+            e.preventDefault();
+        }
+
+        // WebSocket functions
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connection-status');
+            const text = document.getElementById('connection-text');
+            const btn = document.getElementById('connect-btn');
+            const sendBtn = document.getElementById('send-btn');
+
+            isConnected = connected;
+
+            if (connected) {
+                status.className = 'status-indicator status-connected';
+                text.textContent = 'Connected';
+                btn.textContent = 'Disconnect';
+                sendBtn.disabled = false;
+            } else {
+                status.className = 'status-indicator status-disconnected';
+                text.textContent = 'Disconnected';
+                btn.textContent = 'Connect';
+                sendBtn.disabled = true;
+            }
+        }
+
+        function toggleConnection() {
+            if (isConnected) {
+                disconnect();
+            } else {
+                connect();
+            }
+        }
+
+        function connect() {
+            updateConnectionStatus(false);
+            const status = document.getElementById('connection-status');
+            status.className = 'status-indicator status-connecting';
+            document.getElementById('connection-text').textContent = 'Connecting...';
+
+            try {
+                // Determine WebSocket URL based on current location
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                const wsUrl = `${protocol}//${host}/ws`;
+
+                // Update the displayed URL
+                document.querySelector('.ml-auto.text-xs.text-gray-600').textContent = wsUrl;
+
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = function () {
+                    log('WebSocket connected successfully', 'success');
+                    updateConnectionStatus(true);
+                };
+
+                ws.onmessage = function (event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log('Received: ' + JSON.stringify(data, null, 2), 'receive');
+                    } catch (e) {
+                        log('Received: ' + event.data, 'receive');
+                    }
+                };
+
+                ws.onerror = function (error) {
+                    log('WebSocket error: ' + error, 'error');
+                    updateConnectionStatus(false);
+                };
+
+                ws.onclose = function () {
+                    log('WebSocket disconnected', 'info');
+                    updateConnectionStatus(false);
+                };
+            } catch (error) {
+                log('Connection failed: ' + error.message, 'error');
+                updateConnectionStatus(false);
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            updateConnectionStatus(false);
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket is not connected', 'error');
+                return;
+            }
+
+            const method = document.getElementById('method-select').value;
+            const filePath = document.getElementById('file-input').value;
+            const queryText = document.getElementById('query-input').value;
+
+            // Easter Egg: BSOD command
+            if (queryText.toLowerCase().trim() === 'bsod') {
+                triggerBSOD();
+                return;
+            }
+
+            let params = {};
+
+            switch (method) {
+                case 'ingest_document':
+                    if (!filePath) {
+                        log('Please enter a file path', 'error');
+                        return;
+                    }
+                    params = { file_path: filePath, mime_type: 'application/pdf' };
+                    break;
+                case 'query':
+                    if (!queryText) {
+                        log('Please enter a query', 'error');
+                        return;
+                    }
+                    params = { query: queryText };
+                    break;
+                case 'health_check':
+                    params = {};
+                    break;
+            }
+
+            const message = {
+                jsonrpc: '2.0',
+                id: ++messageId,
+                method: method,
+                params: params
+            };
+
+            ws.send(JSON.stringify(message));
+            log('Sent: ' + JSON.stringify(message, null, 2), 'send');
+
+            // Clear inputs
+            document.getElementById('file-input').value = '';
+            document.getElementById('query-input').value = '';
+        }
+
+        function log(message, type = 'info') {
+            const console = document.getElementById('console');
+            const timestamp = new Date().toLocaleTimeString();
+            let prefix = '';
+            let color = '#00ff00';
+
+            switch (type) {
+                case 'send':
+                    prefix = '➤ SEND';
+                    color = '#00aaff';
+                    break;
+                case 'receive':
+                    prefix = '◀ RECV';
+                    color = '#ffaa00';
+                    break;
+                case 'success':
+                    prefix = '✓ OK';
+                    color = '#00ff00';
+                    break;
+                case 'error':
+                    prefix = '✗ ERR';
+                    color = '#ff0000';
+                    break;
+                case 'info':
+                    prefix = '• INFO';
+                    color = '#aaffaa';
+                    break;
+            }
+
+            const logEntry = document.createElement('div');
+            logEntry.style.color = color;
+            logEntry.innerHTML = `<span style="color: #555;">[${timestamp}]</span> <span style="color: ${color};">${prefix}</span> ${message}`;
+            console.appendChild(logEntry);
+            console.scrollTop = console.scrollHeight;
+        }
+
+        function clearConsole() {
+            const console = document.getElementById('console');
+            console.innerHTML = '<div>Console cleared. Ready for connection... <span class="cursor">_</span></div>';
+        }
+
+        // Update clock
+        function updateClock() {
+            const now = new Date();
+            const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            document.getElementById('clock').textContent = time;
+        }
+
+        // Show welcome message
+        window.onload = function () {
+            updateClock();
+            setInterval(updateClock, 1000);
+            openWindow('main');
+
+            setTimeout(() => {
+                log('KBV2 Knowledge Base WebSocket Client ready', 'info');
+                log('Click "Connect" to establish WebSocket connection', 'info');
+            }, 500);
+        };
+
+        // Allow Enter key to send message
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                sendMessage();
+            }
+        });
+
+        function triggerBSOD() {
+            document.getElementById('bsod').style.display = 'block';
+            document.body.style.cursor = 'none';
+        }
+    </script>
+</body>
+
+</html>

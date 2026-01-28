@@ -85,11 +85,14 @@ async def validation_exception_handler(
         error_message = error["msg"]
         error_details[field] = error_message
 
+    method = getattr(request, "method", "WS")
+    path = getattr(request.url, "path", "unknown") if hasattr(request, "url") else "unknown"
+
     logger.warning(
-        f"Validation error for {request.method} {request.url.path}",
+        f"Validation error for {method} {path}",
         extra={
-            "method": request.method,
-            "path": request.url.path,
+            "method": method,
+            "path": path,
             "errors": error_details,
         },
     )
@@ -108,8 +111,8 @@ async def validation_exception_handler(
             "error": error.dict(),
             "data": None,
             "metadata": {
-                "request_id": request.headers.get("x-request-id"),
-                "path": request.url.path,
+                "request_id": getattr(request, "headers", {}).get("x-request-id") if hasattr(request, "headers") else None,
+                "path": path,
             },
         },
     )
@@ -128,19 +131,21 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     Returns:
         JSONResponse with AIP-193 error structure
     """
+    path = getattr(request.url, "path", "unknown") if hasattr(request, "url") else "unknown"
+
     logger.info(
         f"HTTP exception: {exc.status_code} - {exc.detail}",
         extra={
             "status_code": exc.status_code,
             "detail": str(exc.detail),
-            "path": request.url.path,
+            "path": path,
         },
     )
 
     error = create_api_error(
         status_code=exc.status_code,
         message=str(exc.detail),
-        details={"path": request.url.path},
+        details={"path": path},
     )
 
     return JSONResponse(
@@ -150,8 +155,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
             "error": error.dict(),
             "data": None,
             "metadata": {
-                "request_id": request.headers.get("x-request-id"),
-                "path": request.url.path,
+                "request_id": getattr(request, "headers", {}).get("x-request-id") if hasattr(request, "headers") else None,
+                "path": path,
             },
         },
     )
@@ -179,12 +184,15 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
         error_message = str(exc)
         status_code = status.HTTP_400_BAD_REQUEST
 
+    method = getattr(request, "method", "WS")
+    path = getattr(request.url, "path", "unknown") if hasattr(request, "url") else "unknown"
+
     logger.error(
-        f"Unexpected error processing {request.method} {request.url.path}",
+        f"Unexpected error processing {method} {path}",
         exc_info=True,
         extra={
-            "method": request.method,
-            "path": request.url.path,
+            "method": method,
+            "path": path,
             "error_type": exc.__class__.__name__,
         },
     )
@@ -206,11 +214,9 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
             "error": error.dict(),
             "data": None,
             "metadata": {
-                "request_id": request.headers.get("x-request-id"),
-                "path": request.url.path,
-                "support_id": request.headers.get(
-                    "x-request-id"
-                ),  # Helpful for debugging
+                "request_id": getattr(request, "headers", {}).get("x-request-id") if hasattr(request, "headers") else "unknown",
+                "path": path,
+                "support_id": getattr(request, "headers", {}).get("x-request-id") if hasattr(request, "headers") else "unknown",
             },
         },
     )

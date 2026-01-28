@@ -25,7 +25,7 @@ class MCPRequest(BaseModel):
     params: Dict[str, Any] = Field(
         default_factory=dict, description="Parameters for the method"
     )
-    id: Optional[str] = Field(None, description="Unique identifier for the request")
+    id: Optional[str | int] = Field(None, description="Unique identifier for the request")
 
 
 class MCPResponse(BaseModel):
@@ -33,7 +33,7 @@ class MCPResponse(BaseModel):
 
     result: Optional[Any] = Field(None, description="Result of the operation")
     error: Optional[str] = Field(None, description="Error message if operation failed")
-    id: Optional[str] = Field(None, description="Identifier matching the request")
+    id: Optional[str | int] = Field(None, description="Identifier matching the request")
 
 
 class MCPProtocol:

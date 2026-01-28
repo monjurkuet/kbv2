@@ -8,7 +8,12 @@ from typing import Any, Callable, List, Tuple
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import numpy as np
+
 from knowledge_base.common.gateway import GatewayClient, EnhancedGateway
+from knowledge_base.common.resilient_gateway import ResilientGatewayClient
+from knowledge_base.domain.detection import DomainDetector
+from knowledge_base.domain.domain_models import DomainConfig
 from knowledge_base.intelligence.v1.multi_agent_extractor import (
     EntityExtractionManager,
     ExtractionQualityScore,
@@ -38,22 +43,27 @@ from knowledge_base.intelligence.v1.resolution_agent import (
     EntityResolution,
     ResolutionAgent,
 )
-from knowledge_base.intelligence.v1.synthesis_agent import (
-    SynthesisAgent,
+from knowledge_base.intelligence.v1.synthesis_agent import SynthesisAgent
+from knowledge_base.intelligence.v1.entity_typing_service import (
+    EntityTyper,
+    EntityTypingConfig,
+    TypedEntity,
+    DomainType,
 )
 from knowledge_base.observability import Observability
+from knowledge_base.intelligence.v1.domain_schema_service import SchemaRegistry
 from knowledge_base.persistence.v1.schema import (
     Chunk,
+    Community,
     Document,
     Edge,
     Entity,
     ChunkEntity,
-    Community,
     ReviewQueue,
     ReviewStatus,
-    EdgeType,
 )
 from knowledge_base.persistence.v1.vector_store import VectorStore
+from knowledge_base.persistence.v1.graph_store import GraphStore
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -216,14 +226,18 @@ class IngestionOrchestrator:
         self._extraction_manager: EntityExtractionManager | None = None
         self._hallucination_detector: HallucinationDetector | None = None
         self._cross_domain_detector: CrossDomainDetector | None = None
+        self._entity_typer: EntityTyper | None = None
+        self._schema_registry: SchemaRegistry | None = None
+        self._domain_detector: DomainDetector | None = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
         self._observability = Observability()
-        self._gateway = GatewayClient()
+        self._gateway = ResilientGatewayClient()
         self._embedding_client = EmbeddingClient()
         self._vector_store = VectorStore()
-        self._graph_store = GraphStore()
+        # GraphStore is created lazily in methods that have a session
+        self._graph_store = None
         self._gleaning_service = GleaningService(self._gateway)
         self._clustering_service = ClusteringService()
         self._resolution_agent = ResolutionAgent(
@@ -233,21 +247,40 @@ class IngestionOrchestrator:
         self._extraction_manager = None
         self._hallucination_detector = HallucinationDetector()
         self._cross_domain_detector = CrossDomainDetector()
+        self._entity_typer = EntityTyper(
+            gateway=self._gateway,
+            config=EntityTypingConfig(
+                confidence_threshold=0.6,
+                max_few_shot_examples=5,
+                temperature=0.2,
+                enable_domain_awareness=True,
+            ),
+        )
 
         await self._vector_store.initialize()
+        self._domain_detector = DomainDetector(
+            llm_client=self._gateway,
+            config=DomainConfig(
+                min_confidence=0.6,
+                max_predictions=3,
+                enable_keyword_screening=True,
+                enable_llm_analysis=True,
+                keyword_threshold=0.3,
+            ),
+        )
         logger.info("IngestionOrchestrator initialized successfully")
 
-        await self._vector_store.initialize()
-        logger.info("IngestionOrchestrator initialized successfully")
-
-    def _send_progress(self, progress_data: dict[str, Any]) -> None:
+    async def _send_progress(self, progress_data: dict[str, Any]) -> None:
         """Send progress update.
 
         Args:
             progress_data: Progress information to send.
         """
         if self._progress_callback:
-            self._progress_callback(progress_data)
+            if asyncio.iscoroutinefunction(self._progress_callback):
+                await self._progress_callback(progress_data)
+            else:
+                self._progress_callback(progress_data)
 
     def _calculate_domain_scores(self, text: str) -> dict[str, float]:
         """Calculate domain scores based on keyword frequency."""
@@ -289,35 +322,56 @@ class IngestionOrchestrator:
     ) -> str:
         """Determine domain for a document based on its content or metadata.
 
+        Uses the DomainDetector for advanced domain detection with keyword
+        screening and LLM analysis when available.
+
         Args:
             document: The document to determine domain for.
             content_text: Optional document content text for content-based classification.
 
         Returns:
-            Domain string (e.g., "technology", "healthcare", "finance").
+            Domain string (e.g., "TECHNOLOGY", "FINANCIAL", "MEDICAL", "LEGAL",
+            "SCIENTIFIC", "GENERAL").
         """
         if document.doc_metadata and "domain" in document.doc_metadata:
-            return str(document.doc_metadata["domain"])
+            return str(document.doc_metadata["domain"]).upper()
+
+        if content_text and self._domain_detector:
+            import asyncio
+
+            try:
+                result = asyncio.run(self._domain_detector.detect_domain(content_text))
+                if result.primary_domain:
+                    return result.primary_domain
+            except Exception:
+                pass
 
         if content_text:
             scores = self._calculate_domain_scores(content_text)
             best_domain = max(scores, key=lambda k: scores.get(k, 0.0))
             if scores.get(best_domain, 0) >= 0.1:
-                return best_domain
+                return best_domain.upper()
 
         name_lower = document.name.lower()
         if any(term in name_lower for term in ["tech", "software", "code", "api"]):
-            return "technology"
+            return "TECHNOLOGY"
         elif any(
             term in name_lower for term in ["health", "medical", "patient", "doctor"]
         ):
-            return "healthcare"
+            return "MEDICAL"
         elif any(
             term in name_lower for term in ["finance", "bank", "money", "investment"]
         ):
-            return "finance"
+            return "FINANCIAL"
+        elif any(term in name_lower for term in ["legal", "law", "contract", "court"]):
+            return "LEGAL"
+        elif any(
+            term in name_lower
+            for term in ["research", "science", "study", "experiment"]
+        ):
+            return "SCIENTIFIC"
         else:
-            return "general"
+            return "GENERAL"
 
     async def _partition_document(
         self,
@@ -550,6 +604,75 @@ class IngestionOrchestrator:
 
                 await session.commit()
 
+                if self._cross_domain_detector:
+                    entity_result = await session.execute(
+                        select(Entity)
+                        .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
+                        .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
+                        .where(Chunk.document_id == document.id)
+                    )
+                    entities = entity_result.scalars().all()
+
+                    edge_result = await session.execute(
+                        select(Edge)
+                        .join(Entity, Edge.source_id == Entity.id)
+                        .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
+                        .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
+                        .where(Chunk.document_id == document.id)
+                    )
+                    existing_edges = edge_result.scalars().all()
+
+                    if entities:
+                        entities_data = [
+                            {
+                                "id": str(e.id),
+                                "name": e.name,
+                                "entity_type": e.entity_type,
+                                "domain": getattr(e, "domain", "general") or "general",
+                                "properties": e.properties or {},
+                            }
+                            for e in entities
+                        ]
+                        edges_data = [
+                            {
+                                "id": str(e.id),
+                                "source_id": str(e.source_id),
+                                "target_id": str(e.target_id),
+                                "edge_type": e.edge_type,
+                            }
+                            for e in existing_edges
+                        ]
+
+                        document_domain = self._determine_domain(document)
+                        cross_domain_edges = await self._cross_domain_detector.detect_cross_domain_relationships(
+                            entities=entities_data,
+                            edges=edges_data,
+                            document_domain=document_domain,
+                        )
+
+                        for edge_dict in cross_domain_edges:
+                            new_edge = Edge(
+                                id=uuid4(),
+                                source_id=UUID(edge_dict["source_id"]),
+                                target_id=UUID(edge_dict["target_id"]),
+                                edge_type=edge_dict["edge_type"],
+                                properties=edge_dict.get("properties", {}),
+                                confidence=edge_dict.get("confidence", 0.5),
+                                provenance=edge_dict.get(
+                                    "provenance", "cross_domain_detection"
+                                ),
+                                domain=edge_dict.get("domain", document_domain),
+                            )
+                            session.add(new_edge)
+
+                        if cross_domain_edges:
+                            await session.commit()
+                            obs.log_metric(
+                                "cross_domain_edges_added",
+                                len(cross_domain_edges),
+                                document_id=str(document.id),
+                            )
+
                 doc_in_session = await session.get(Document, document.id)
                 if doc_in_session:
                     doc_in_session.status = "extracted"
@@ -585,64 +708,216 @@ class IngestionOrchestrator:
                 )
                 entities = result.scalars().all()
 
-            for entity in entities:
-                embedding = entity.embedding if entity.embedding is not None else []
-                similar = await self._vector_store.search_similar_entities(
-                    embedding,
-                    limit=5,
-                    similarity_threshold=0.85,
-                )
-
-                candidates = [
-                    e
-                    for e in entities
-                    if e.id != entity.id and str(e.id) in [s["id"] for s in similar]
-                ]
-
-                if candidates:
-                    chunk_text = ""
-                    chunk_result = await session.execute(
-                        select(Chunk)
-                        .join(ChunkEntity, ChunkEntity.chunk_id == Chunk.id)
-                        .where(ChunkEntity.entity_id == entity.id)
-                        .limit(1)
-                    )
-                    chunk = chunk_result.scalar_one_or_none()
-                    if chunk:
-                        chunk_text = (
-                            str(chunk.text)
-                            if hasattr(chunk.text, "value")
-                            else chunk.text
+                for entity in entities:
+                    embedding = entity.embedding
+                    if embedding is not None:
+                        embedding = (
+                            embedding.tolist()
+                            if hasattr(embedding, "tolist")
+                            else embedding
                         )
-
-                    resolution = await self._resolution_agent.resolve_entity(
-                        entity,
-                        candidates,
-                        chunk_text,
+                    else:
+                        embedding = []
+                    similar = await self._vector_store.search_similar_entities(
+                        embedding,
+                        limit=5,
+                        similarity_threshold=0.85,
                     )
 
-                    if resolution.merged_entity_ids:
-                        doc_id = (
-                            UUID(str(document.id))
-                            if not isinstance(document.id, UUID)
-                            else document.id
+                    candidates = [
+                        e
+                        for e in entities
+                        if e.id != entity.id and str(e.id) in [s["id"] for s in similar]
+                    ]
+
+                    if candidates:
+                        chunk_text = ""
+                        chunk_result = await session.execute(
+                            select(Chunk)
+                            .join(ChunkEntity, ChunkEntity.chunk_id == Chunk.id)
+                            .where(ChunkEntity.entity_id == entity.id)
+                            .limit(1)
                         )
-                        ent_id = (
-                            UUID(str(entity.id))
-                            if not isinstance(entity.id, UUID)
-                            else entity.id
-                        )
-                        if resolution.human_review_required:
-                            await self._add_to_review_queue(
-                                doc_id,
-                                ent_id,
-                                resolution.merged_entity_ids,
-                                resolution.confidence_score,
-                                resolution.grounding_quote,
-                                chunk_text,
+                        chunk = chunk_result.scalar_one_or_none()
+                        if chunk:
+                            chunk_text = (
+                                str(chunk.text)
+                                if hasattr(chunk.text, "value")
+                                else chunk.text
                             )
-                        else:
-                            await self._merge_entities(resolution)
+
+                        resolution = await self._resolution_agent.resolve_entity(
+                            entity,
+                            candidates,
+                            chunk_text,
+                        )
+
+                        if resolution.merged_entity_ids:
+                            doc_id = (
+                                UUID(str(document.id))
+                                if not isinstance(document.id, UUID)
+                                else document.id
+                            )
+                            ent_id = (
+                                UUID(str(entity.id))
+                                if not isinstance(entity.id, UUID)
+                                else entity.id
+                            )
+                            if resolution.human_review_required:
+                                await self._add_to_review_queue(
+                                    doc_id,
+                                    ent_id,
+                                    resolution.merged_entity_ids,
+                                    resolution.confidence_score,
+                                    resolution.grounding_quote,
+                                    chunk_text,
+                                )
+                            else:
+                                await self._merge_entities(resolution)
+
+            return document
+
+    async def _refine_entity_types(self, document: Document) -> Document:
+        obs = self._observability
+
+        async with obs.trace_context(
+            "refine_entity_types", document_id=str(document.id)
+        ):
+            async with self._vector_store.get_session() as session:
+                entity_result = await session.execute(
+                    select(Entity)
+                    .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
+                    .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
+                    .where(Chunk.document_id == document.id)
+                )
+                entities = entity_result.scalars().all()
+
+            if not entities:
+                return document
+
+            typed_entities = []
+            for entity in entities:
+                typed_entity = TypedEntity(
+                    entity_id=entity.id,
+                    name=entity.name,
+                    description=entity.description or "",
+                    source_text=None,
+                    properties=entity.properties or {},
+                )
+                typed_entities.append(typed_entity)
+
+            refined_entities = await self._entity_typer.type_entities(typed_entities)
+
+            entity_type_map = {str(e.entity_id): e for e in refined_entities}
+
+            async with self._vector_store.get_session() as session:
+                for entity in entities:
+                    entity_id_str = str(entity.id)
+                    if entity_id_str in entity_type_map:
+                        refined = entity_type_map[entity_id_str]
+                        entity.entity_type = refined.entity_type.value
+                        entity.domain = (
+                            str(refined.domain) if refined.domain else entity.domain
+                        )
+                        entity.confidence = refined.confidence_score
+
+                await session.commit()
+
+                doc_in_session = await session.get(Document, document.id)
+                if doc_in_session:
+                    doc_in_session.status = "typed"
+                    await session.commit()
+                    refreshed_doc = await session.get(Document, document.id)
+                    if refreshed_doc:
+                        document = refreshed_doc
+
+            obs.log_metric(
+                "entities_refined",
+                len(refined_entities),
+                document_id=str(document.id),
+            )
+
+            return document
+
+    async def _validate_entities_against_schema(self, document: Document) -> Document:
+        obs = self._observability
+
+        async with obs.trace_context(
+            "validate_entities_against_schema", document_id=str(document.id)
+        ):
+            async with self._vector_store.get_session() as session:
+                registry = SchemaRegistry(session)
+                schema = await registry.get_by_name(document.domain)
+
+                if not schema:
+                    logger.info(f"No schema found for domain: {document.domain}")
+                    return document
+
+                entity_result = await session.execute(
+                    select(Entity)
+                    .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
+                    .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
+                    .where(Chunk.document_id == document.id)
+                )
+                entities = entity_result.scalars().all()
+
+            if not entities:
+                return document
+
+            validated_count = 0
+            missing_attributes_added = 0
+
+            for entity in entities:
+                if not entity.entity_type:
+                    continue
+
+                try:
+                    async with self._vector_store.get_session() as session:
+                        registry = SchemaRegistry(session)
+                        entity_type_def = await registry.apply_inheritance(
+                            document.domain, entity.entity_type
+                        )
+
+                        if not entity_type_def:
+                            continue
+
+                        entity_properties = entity.properties or {}
+                        properties_modified = False
+
+                        for required_attr in entity_type_def.required_attributes:
+                            if required_attr not in entity_properties:
+                                attr_def = entity_type_def.attributes.get(required_attr)
+                                if attr_def and attr_def.default_value is not None:
+                                    entity_properties[required_attr] = (
+                                        attr_def.default_value
+                                    )
+                                    missing_attributes_added += 1
+                                    properties_modified = True
+
+                        if properties_modified:
+                            entity_to_update = await session.get(Entity, entity.id)
+                            if entity_to_update:
+                                entity_to_update.properties = entity_properties
+                                await session.commit()
+
+                        validated_count += 1
+
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to validate entity {entity.id} against schema: {e}"
+                    )
+                    continue
+
+            obs.log_metric(
+                "entities_validated",
+                validated_count,
+                document_id=str(document.id),
+            )
+            obs.log_metric(
+                "missing_attributes_added",
+                missing_attributes_added,
+                document_id=str(document.id),
+            )
 
             return document
 
@@ -1009,7 +1284,9 @@ class IngestionOrchestrator:
 
         return edges
 
-    def _emit_progress(self, stage: int, status: str, message: str, **kwargs) -> None:
+    async def _emit_progress(
+        self, stage: int, status: str, message: str, **kwargs
+    ) -> None:
         """Emit progress update.
 
         Args:
@@ -1025,10 +1302,16 @@ class IngestionOrchestrator:
             "total_stages": 9,
             **kwargs,
         }
-        self._send_progress(progress_data)
+        await self._send_progress(progress_data)
 
-    async def _ensure_extraction_manager(self) -> EntityExtractionManager:
-        """Ensure extraction manager is initialized."""
+    async def _ensure_extraction_manager(
+        self,
+    ) -> EntityExtractionManager | None:
+        """Ensure extraction manager is initialized.
+
+        Returns:
+            Extraction manager or None if session is not available.
+        """
         if self._extraction_manager is None:
             from knowledge_base.persistence.v1.graph_store import GraphStore
 
@@ -1050,36 +1333,43 @@ class IngestionOrchestrator:
         List[Entity], List[Edge], ExtractionQualityScore, List[EntityVerification]
     ]:
         """Extract entities using multi-agent system with quality verification."""
-        try:
-            extraction_manager = await self._ensure_extraction_manager()
+        from knowledge_base.persistence.v1.graph_store import GraphStore
 
+        try:
             async with self._vector_store.get_session() as session:
                 chunk_result = await session.execute(
                     select(Chunk).where(Chunk.document_id == document.id)
                 )
                 chunks = chunk_result.scalars().all()
 
-            if not chunks:
-                return (
-                    [],
-                    [],
-                    ExtractionQualityScore(
-                        overall_score=0.0,
-                        entity_quality=0.0,
-                        relationship_quality=0.0,
-                        coherence_score=0.0,
-                        quality_level="failed",
-                        feedback="No chunks found for document",
-                    ),
-                    [],
+                if not chunks:
+                    return (
+                        [],
+                        [],
+                        ExtractionQualityScore(
+                            overall_score=0.0,
+                            entity_quality=0.0,
+                            relationship_quality=0.0,
+                            coherence_score=0.0,
+                            quality_level="failed",
+                            feedback="No chunks found for document",
+                        ),
+                        [],
+                    )
+
+                graph_store = GraphStore(session)
+                extraction_manager = EntityExtractionManager(
+                    gateway=self._gateway,
+                    graph_store=graph_store,
+                    vector_store=self._vector_store,
                 )
 
-            (
-                extracted_entities,
-                quality_score,
-            ) = await extraction_manager.extract_with_evaluation(
-                list(chunks), document.id
-            )
+                (
+                    extracted_entities,
+                    quality_score,
+                ) = await extraction_manager.extract_with_evaluation(
+                    list(chunks), document.id
+                )
 
             entities, edges = self._convert_extraction_to_entities(
                 extracted_entities, chunks
@@ -1238,39 +1528,63 @@ class IngestionOrchestrator:
                 "document_ingestion",
                 file_path=str(file_path),
             ):
-                self._emit_progress(1, "started", "Creating document record")
+                await self._emit_progress(1, "started", "Creating document record")
                 document = await self._create_document(file_path, document_name)
-                self._emit_progress(1, "completed", "Document record created")
+                await self._emit_progress(1, "completed", "Document record created")
 
-                self._emit_progress(2, "started", "Partitioning document into chunks")
+                await self._emit_progress(
+                    2, "started", "Partitioning document into chunks"
+                )
                 document = await self._partition_document(document, file_path)
-                self._emit_progress(2, "completed", "Document partitioned into chunks")
+                await self._emit_progress(
+                    2, "completed", "Document partitioned into chunks"
+                )
 
-                self._emit_progress(
+                await self._emit_progress(
                     3, "started", "Extracting knowledge (entities and edges)"
                 )
                 document = await self._extract_knowledge(document)
-                self._emit_progress(3, "completed", "Knowledge extraction complete")
+                await self._emit_progress(
+                    3, "completed", "Knowledge extraction complete"
+                )
 
-                self._emit_progress(4, "started", "Embedding chunks and entities")
+                await self._emit_progress(3.5, "started", "Refining entity types")
+                document = await self._refine_entity_types(document)
+                await self._emit_progress(
+                    3.5, "completed", "Entity type refinement complete"
+                )
+
+                await self._emit_progress(
+                    3.75, "started", "Validating entities against schema"
+                )
+                document = await self._validate_entities_against_schema(document)
+                await self._emit_progress(
+                    3.75, "completed", "Entity schema validation complete"
+                )
+
+                await self._emit_progress(4, "started", "Embedding chunks and entities")
                 document = await self._embed_content(document)
-                self._emit_progress(4, "completed", "Embedding complete")
+                await self._emit_progress(4, "completed", "Embedding complete")
 
-                self._emit_progress(5, "started", "Resolving duplicate entities")
+                await self._emit_progress(5, "started", "Resolving duplicate entities")
                 document = await self._resolve_entities(document)
-                self._emit_progress(5, "completed", "Entity resolution complete")
+                await self._emit_progress(5, "completed", "Entity resolution complete")
 
-                self._emit_progress(
+                await self._emit_progress(
                     6, "started", "Clustering entities into communities"
                 )
                 document = await self._cluster_entities(document)
-                self._emit_progress(6, "completed", "Entity clustering complete")
+                await self._emit_progress(6, "completed", "Entity clustering complete")
 
-                self._emit_progress(7, "started", "Generating intelligence reports")
+                await self._emit_progress(
+                    7, "started", "Generating intelligence reports"
+                )
                 document = await self._generate_reports(document)
-                self._emit_progress(7, "completed", "Intelligence reports generated")
+                await self._emit_progress(
+                    7, "completed", "Intelligence reports generated"
+                )
 
-                self._emit_progress(
+                await self._emit_progress(
                     8, "started", "Updating domain for document and entities"
                 )
                 final_domain = (
@@ -1300,9 +1614,9 @@ class IngestionOrchestrator:
                     for edge in edge_result.scalars().all():
                         edge.domain = str(final_domain) if final_domain else None
                     await session.commit()
-                self._emit_progress(8, "completed", "Domain updated successfully")
+                await self._emit_progress(8, "completed", "Domain updated successfully")
 
-                self._emit_progress(9, "started", "Finalizing document status")
+                await self._emit_progress(9, "started", "Finalizing document status")
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
                     if doc_to_update:
@@ -1311,7 +1625,9 @@ class IngestionOrchestrator:
                         refreshed_doc = await session.get(Document, document.id)
                         if refreshed_doc:
                             document = refreshed_doc
-                self._emit_progress(9, "completed", "Document processing complete")
+                await self._emit_progress(
+                    9, "completed", "Document processing complete"
+                )
 
                 obs.log_event(
                     "document_processing_completed",

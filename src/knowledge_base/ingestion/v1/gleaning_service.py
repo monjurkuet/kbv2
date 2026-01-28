@@ -1,8 +1,10 @@
 """Adaptive gleaning extraction service."""
 
+import json
 import logging
+import re
 from datetime import datetime
-from typing import Any
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +17,10 @@ from knowledge_base.common.temporal_utils import (
     TemporalType,
 )
 from knowledge_base.persistence.v1.schema import EdgeType
+from knowledge_base.extraction.guided_extractor import (
+    GuidedExtractor,
+    ExtractionPrompts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +76,77 @@ class ExtractedEdge(BaseModel):
     )
 
 
+class ExtractedTable(BaseModel):
+    """Extracted table from document content.
+
+    Attributes:
+        content: Markdown table format with headers and rows.
+        page_number: Page number where the table appears (from element metadata).
+        description: Brief description of the table contents.
+    """
+
+    content: str = Field(..., description="Markdown table format")
+    page_number: int | None = Field(None, description="Page number")
+    description: str = Field("", description="Table description")
+
+
+class ExtractedImage(BaseModel):
+    """Extracted image with visible text content.
+
+    Attributes:
+        description: Description of the image content.
+        embedded_text: Any visible text extracted from the image (OCR via LLM analysis).
+        page_number: Page number where the image appears (from element metadata).
+    """
+
+    description: str = Field(..., description="Image description")
+    embedded_text: str = Field("", description="Text visible in image")
+    page_number: int | None = Field(None, description="Page number")
+
+
+class ExtractedFigure(BaseModel):
+    """Extracted chart, diagram, or graph with data points.
+
+    Attributes:
+        type: Type of figure (bar_chart, line_graph, pie_chart, diagram, flowchart, other).
+        description: Description of the figure's content and purpose.
+        data_points: List of data points extracted from the figure.
+    """
+
+    type: str = Field(..., description="Figure type")
+    description: str = Field(..., description="Figure description")
+    data_points: list[dict[str, Any]] = Field(
+        default_factory=list, description="Data points"
+    )
+
+
 class ExtractionResult(BaseModel):
-    """Extraction result from a pass."""
+    """Extraction result from a pass.
+
+    Attributes:
+        entities: List of extracted entities.
+        edges: List of extracted relationships.
+        temporal_claims: List of temporal claims.
+        information_density: Remaining information density score.
+        tables: List of extracted tables in markdown format.
+        images_with_text: List of images with extracted visible text.
+        figures: List of charts, diagrams, and graphs with data points.
+    """
 
     entities: list[ExtractedEntity] = Field(default_factory=list)
     edges: list[ExtractedEdge] = Field(default_factory=list)
     temporal_claims: list[TemporalClaim] = Field(default_factory=list)
     information_density: float = Field(
         default=0.0, description="Remaining info density"
+    )
+    tables: list[ExtractedTable] = Field(
+        default_factory=list, description="Extracted tables"
+    )
+    images_with_text: list[ExtractedImage] = Field(
+        default_factory=list, description="Images with extracted text"
+    )
+    figures: list[ExtractedFigure] = Field(
+        default_factory=list, description="Extracted figures"
     )
 
 
@@ -88,16 +157,19 @@ class GleaningService:
         self,
         gateway: GatewayClient,
         config: GleaningConfig | None = None,
+        guided_extractor: Optional[GuidedExtractor] = None,
     ) -> None:
         """Initialize gleaning service.
 
         Args:
             gateway: LLM gateway client.
             config: Gleaning configuration.
+            guided_extractor: Optional guided extractor for domain-specific extraction.
         """
         self._gateway = gateway
         self._config = config or GleaningConfig()
         self._temporal_normalizer = TemporalNormalizer()
+        self._guided_extractor = guided_extractor or GuidedExtractor(gateway)
 
     def calculate_new_information_gain(
         self,
@@ -136,6 +208,21 @@ class GleaningService:
 
         return len(intersection) / len(union)
 
+    def _check_long_tail_distribution(
+        self,
+        result: ExtractionResult,
+        previous_results: list[ExtractionResult],
+    ) -> bool:
+        """Check if we're extracting long-tail relations (high density but low new info).
+
+        Returns True if long-tail pattern detected (should log and potentially handle).
+        """
+        return (
+            result.information_density >= self._config.min_density_threshold
+            and len(previous_results) >= 1
+            and self.calculate_new_information_gain(previous_results[-1], result) < 0.1
+        )
+
     def should_continue_extraction(
         self,
         pass_num: int,
@@ -161,7 +248,7 @@ class GleaningService:
         # Check if this is actually an LLM failure
         if result.information_density < 0:
             return False, "llm_failure"
-        
+
         # Check information density of the most recent result
         if result.information_density < self._config.min_density_threshold:
             return False, "low_information_density"
@@ -189,35 +276,7 @@ class GleaningService:
         # Additional check for long-tail distribution handling:
         # If information density is high but new information gain is low,
         # this might indicate we're finding mostly rare/long-tail relations
-        if (
-            result.information_density >= self._config.min_density_threshold
-            and len(previous_results) >= 1
-            and self.calculate_new_information_gain(previous_results[-1], result) < 0.1
-        ):
-            logger.info(
-                f"High density but low new info gain - may be extracting long-tail relations"
-            )
-
-        # Additional check for long-tail distribution handling:
-        # If information density is high but new information gain is low,
-        # this might indicate we're finding mostly rare/long-tail relations
-        if (
-            result.information_density >= self._config.min_density_threshold
-            and len(previous_results) >= 1
-            and self.calculate_new_information_gain(previous_results[-1], result) < 0.1
-        ):
-            logger.info(
-                f"High density but low new info gain - may be extracting long-tail relations"
-            )
-
-        # Additional check for long-tail distribution handling:
-        # If information density is high but new information gain is low,
-        # this might indicate we're finding mostly rare/long-tail relations
-        if (
-            result.information_density >= self._config.min_density_threshold
-            and len(previous_results) >= 1
-            and self.calculate_new_information_gain(previous_results[-1], result) < 0.1
-        ):
+        if self._check_long_tail_distribution(result, previous_results):
             logger.info(
                 f"High density but low new info gain - may be extracting long-tail relations"
             )
@@ -260,36 +319,60 @@ class GleaningService:
         self,
         text: str,
         context: str | None = None,
+        user_goals: Optional[List[str]] = None,
+        domain: Optional[str] = None,
     ) -> ExtractionResult:
         """Perform adaptive gleaning extraction.
 
         Args:
             text: Text to extract from.
             context: Optional surrounding context.
+            user_goals: Optional list of user-specified extraction goals.
+                        If None, uses domain-based default goals (fully automated).
+            domain: Optional domain hint for extraction.
 
         Returns:
             Complete extraction result.
         """
         logger.info(f"🔍 EXTRACT: Starting extraction for text length {len(text)}")
         logger.info(f"🔍 EXTRACT: Text preview: {text[:100]}...")
-        
+        if user_goals:
+            logger.info(f"🔍 EXTRACT: User goals provided: {user_goals}")
+        if domain:
+            logger.info(f"🔍 EXTRACT: Domain specified: {domain}")
+
         results: list[ExtractionResult] = []
 
-        # Pass 1 always runs
-        logger.info(f"🔍 EXTRACT: Starting Pass 1")
-        pass_result = await self._extract_pass(text, 1, context, [])
-        logger.info(f"🔍 EXTRACT: Pass 1 complete - entities: {len(pass_result.entities)}, edges: {len(pass_result.edges)}")
-        logger.info(f"🔍 EXTRACT: Pass 1 info density: {pass_result.information_density}")
+        guided_prompts = None
+        if self._guided_extractor:
+            guided_prompts = await self._guided_extractor.generate_extraction_prompts(
+                document_text=text,
+                user_goals=user_goals,
+                domain=domain,
+            )
+            logger.info(
+                f"🔍 EXTRACT: Generated {len(guided_prompts.prompts)} guided prompts "
+                f"for domain {guided_prompts.domain}"
+            )
+
+        pass_result = await self._extract_pass(text, 1, context, [], guided_prompts)
+        logger.info(
+            f"🔍 EXTRACT: Pass 1 complete - entities: {len(pass_result.entities)}, edges: {len(pass_result.edges)}"
+        )
+        logger.info(
+            f"🔍 EXTRACT: Pass 1 info density: {pass_result.information_density}"
+        )
         results.append(pass_result)
 
-        # Only run pass 2 if pass 1 indicates sufficient information density
         should_continue, reason = self.should_continue_extraction(
             pass_num=2, result=pass_result, previous_results=results
         )
 
         if should_continue:
             logger.info(f"Continuing to pass 2: {reason}")
-            pass_result = await self._extract_pass(text, 2, context, results)
+            pass_result = await self._extract_pass(
+                text, 2, context, results, guided_prompts
+            )
             results.append(pass_result)
         else:
             logger.info(f"Stopping after pass 1: {reason}")
@@ -302,11 +385,8 @@ class GleaningService:
         pass_num: int,
         context: str | None,
         previous_results: list[ExtractionResult],
+        guided_prompts: Optional[ExtractionPrompts] = None,
     ) -> ExtractionResult:
-        logger.info(f"🔍 PASS {pass_num}: Starting extraction pass")
-        logger.info(f"🔍 PASS {pass_num}: Text length: {len(text)}")
-        if context:
-            logger.info(f"🔍 PASS {pass_num}: Context provided: {context[:50]}...")
         """Perform single extraction pass.
 
         Args:
@@ -314,11 +394,17 @@ class GleaningService:
             pass_num: Pass number (1 or 2).
             context: Optional context.
             previous_results: Results from previous passes.
+            guided_prompts: Optional guided extraction prompts for domain-specific extraction.
 
         Returns:
             Extraction result for this pass.
         """
         logger.info(f"Starting pass {pass_num} for text of length {len(text)}")
+
+        if guided_prompts and self._guided_extractor:
+            return await self._guided_extraction_pass(
+                text, pass_num, previous_results, guided_prompts
+            )
 
         if pass_num == 1:
             system_prompt = self._get_discovery_prompt()
@@ -346,14 +432,71 @@ class GleaningService:
 
         return self._parse_extraction_result(response, text)
 
+    async def _guided_extraction_pass(
+        self,
+        text: str,
+        pass_num: int,
+        previous_results: list[ExtractionResult],
+        guided_prompts: ExtractionPrompts,
+    ) -> ExtractionResult:
+        """Perform guided extraction pass with domain-specific prompts.
+
+        Args:
+            text: Text to extract from.
+            pass_num: Pass number.
+            previous_results: Results from previous passes.
+            guided_prompts: Domain-specific extraction prompts.
+
+        Returns:
+            Extraction result for this pass.
+        """
+        logger.info(
+            f"Starting guided extraction pass {pass_num} with {len(guided_prompts.prompts)} prompts"
+        )
+
+        all_results = []
+        for prompt in guided_prompts.prompts:
+            try:
+                response = await self._gateway.generate_text(
+                    prompt=prompt.user_prompt,
+                    system_prompt=prompt.system_prompt,
+                    temperature=0.0,
+                    json_mode=True,
+                )
+
+                result = self._parse_extraction_result(response, text)
+                all_results.append(result)
+
+                logger.info(
+                    f"Guided extraction for goal '{prompt.goal_name}': "
+                    f"{len(result.entities)} entities, {len(result.edges)} edges"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed guided extraction for goal '{prompt.goal_name}': {e}"
+                )
+
+        return self._merge_guided_results(all_results, guided_prompts.domain)
+
     def _get_discovery_prompt(self) -> str:
-        """Get discovery pass system prompt."""
-        return """You are an expert information extraction system. Your task is to extract entities and relationships from the provided text.
+        """Get discovery pass system prompt with multi-modal extraction capabilities.
+
+        This prompt instructs the LLM to extract entities, relationships, temporal
+        information, and multi-modal content (tables, images, figures) from the text.
+
+        Returns:
+            System prompt string for discovery pass.
+        """
+        return """You are an expert information extraction system. Your task is to extract
+entities and relationships from the provided text.
 
 Focus on:
 1. Clearly named entities (people, organizations, locations, concepts)
 2. Explicit relationships between entities
 3. Temporal information (dates, times, durations) - ESPECIALLY from timeline entries
+4. TABLES: Extract all tables in markdown format with headers and rows
+5. IMAGES: Describe images and extract any visible text (OCR via LLM analysis)
+6. FIGURES: Describe charts, diagrams, graphs and their data points
 
 CRITICAL: You must respond with valid JSON only. Do not include markdown code blocks, explanations, or any text outside the JSON structure.
 
@@ -382,6 +525,27 @@ Output in the following JSON schema:
       "date": "string (optional date)"
     }
   ],
+  "tables": [
+    {
+      "content": "| Header1 | Header2 |\\n| --- | --- |\\n| Cell1 | Cell2 |",
+      "page_number": 1,
+      "description": "Sales data for Q1 2024"
+    }
+  ],
+  "images_with_text": [
+    {
+      "description": "Dashboard screenshot showing key metrics",
+      "embedded_text": "Total Users: 1,234\\nRevenue: $56,789\\nGrowth: 15%",
+      "page_number": 2
+    }
+  ],
+  "figures": [
+    {
+      "type": "bar_chart",
+      "description": "Monthly revenue trend for 2024",
+      "data_points": [{"month": "Jan", "value": 10000}]
+    }
+  ],
   "information_density": 0.7
 }
 
@@ -390,6 +554,21 @@ IMPORTANT FOR TEMPORAL CLAIMS:
 - Include BOTH the date AND the status in the "text" field
 - Set "type" to "static" for dated events
 - Set "date" to the actual date mentioned
+
+IMPORTANT FOR TABLES:
+- Extract tables in markdown format with proper headers and row separators
+- Include page_number if available from element metadata
+- Provide a brief description of the table contents
+
+IMPORTANT FOR IMAGES:
+- Describe what the image shows (charts, diagrams, photos, screenshots)
+- Extract ALL visible text from the image
+- Include page_number if available
+
+IMPORTANT FOR FIGURES:
+- Identify the type: bar_chart, line_graph, pie_chart, diagram, flowchart, scatter_plot
+- Describe what the figure visualizes
+- Extract data points as structured objects
 
 Be precise and factual. Only extract information explicitly stated in the text."""
 
@@ -412,7 +591,14 @@ Provide your analysis in JSON format."""
         return prompt
 
     def _get_gleaning_prompt(self) -> str:
-        """Get gleaning pass system prompt."""
+        """Get gleaning pass system prompt with multi-modal focus.
+
+        This prompt instructs the LLM to find subtle, nested, or technical relationships
+        that were missed in the first pass, including multi-modal content.
+
+        Returns:
+            System prompt string for gleaning pass.
+        """
         return """You are an expert information extraction system performing a second pass analysis.
 
 Your task is to find subtle, nested, or technical relationships that were missed in the first pass.
@@ -422,6 +608,9 @@ Focus on:
 2. Nested or hierarchical structures
 3. Technical or domain-specific connections
 4. Temporal relationships and dependencies - especially timeline entries with status changes
+5. TABLES: Extract additional tables or missed table content
+6. IMAGES: Look for images with text that may have been overlooked
+7. FIGURES: Find charts, diagrams, and graphs with their data points
 
 CRITICAL: You must respond with valid JSON only. Do not include markdown code blocks, explanations, or any text outside the JSON structure.
 
@@ -430,6 +619,9 @@ Output in the same JSON schema as the first pass:
   "entities": [{"name": "...", "type": "...", "description": "...", "confidence": 0.9}],
   "edges": [{"source": "...", "target": "...", "type": "...", "confidence": 0.9}],
   "temporal_claims": [{"text": "...", "type": "atemporal|static|dynamic", "date": "..."}],
+  "tables": [{"content": "| Header1 | Header2 |", "page_number": 1, "description": "..."}],
+  "images_with_text": [{"description": "...", "embedded_text": "...", "page_number": 1}],
+  "figures": [{"type": "...", "description": "...", "data_points": [...]}],
   "information_density": 0.7
 }
 
@@ -437,6 +629,11 @@ IMPORTANT FOR TEMPORAL CLAIMS:
 - Look for timeline entries that combine dates with status information
 - Extract the FULL phrase including both date and status (e.g., "August 2021: Project initiated, status 'Active'")
 - Include status keywords like "Active", "Failed", "Success", "Completed" in the claim text
+
+IMPORTANT FOR MULTI-MODAL CONTENT:
+- Re-examine the content for any tables, images, or figures that were missed
+- For figures, extract data points as structured JSON objects
+- Describe image content and extract embedded text thoroughly
 
 Be thorough but avoid hallucinating information not present in the text."""
 
@@ -474,29 +671,23 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
         response: str,
         text: str,
     ) -> ExtractionResult:
-        """Parse LLM response into extraction result.
+        """Parse LLM response into extraction result with multi-modal support.
 
         Args:
             response: LLM JSON response.
             text: Original text for temporal extraction.
 
         Returns:
-            Parsed extraction result.
+            Parsed extraction result including entities, edges, temporal claims,
+            tables, images, and figures.
         """
-        import json
-        import re
-
-        # Preprocess response to handle markdown code blocks
         cleaned_response = response.strip()
 
-        # Remove markdown code block markers if present
         markdown_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
         match = re.search(markdown_pattern, cleaned_response)
         if match:
             cleaned_response = match.group(1)
 
-        # Also handle case where JSON might be surrounded by other text
-        # Try to find the first { and last }
         first_brace = cleaned_response.find("{")
         last_brace = cleaned_response.rfind("}")
         if first_brace != -1 and last_brace != -1:
@@ -519,7 +710,7 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
                     properties=e.get("properties", {}),
                     confidence=e.get("confidence", 1.0),
                 )
-                if entity.name:  # Only add if entity has a name
+                if entity.name:
                     entities.append(entity)
             except Exception as ex:
                 logger.warning(f"Failed to create entity from data {e}: {ex}")
@@ -529,36 +720,25 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
             try:
                 edge_type = EdgeType(edge.get("type", "RELATED_TO"))
             except ValueError:
-                # Handle unknown edge types by falling back to RELATED_TO or NOTA
-                # This addresses the long-tail distribution problem where many relation types are rare
                 raw_type = edge.get("type", "RELATED_TO")
                 logger.warning(f"Invalid edge type: {raw_type}, using fallback")
 
-                # For unknown types, use either RELATED_TO as general fallback or NOTA as "none-of-the-above"
-                # This follows recent research on handling long-tail distributions in relation extraction
                 if raw_type and raw_type.lower() not in ["unknown", "none", "null", ""]:
                     edge_type = EdgeType.RELATED_TO
                 else:
-                    edge_type = EdgeType.NOTA
+                    edge_type = EdgeType.RELATED_TO
 
-            # Enhance edge properties with context to help with long-tail relation identification
             enhanced_properties = edge.get("properties", {}).copy()
-            # Add source text context for better relation understanding
             if "source_text" in edge:
                 enhanced_properties["source_text"] = edge["source_text"]
             if "relation_context" in edge:
                 enhanced_properties["relation_context"] = edge["relation_context"]
 
-            # Extract temporal information from the LLM response directly
-            # The LLM should provide temporal information as part of the relationship
             temporal_start = None
             temporal_end = None
 
-            # Check if the LLM provided temporal validity information
             if "temporal_validity_start" in edge:
                 try:
-                    from datetime import datetime
-
                     temp_start = edge["temporal_validity_start"]
                     if isinstance(temp_start, str):
                         temporal_start = (
@@ -575,8 +755,6 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
 
             if "temporal_validity_end" in edge:
                 try:
-                    from datetime import datetime
-
                     temp_end = edge["temporal_validity_end"]
                     if isinstance(temp_end, str):
                         temporal_end = (
@@ -591,7 +769,6 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
                 except (ValueError, TypeError):
                     pass
 
-            # Default source text if not provided
             source_text = edge.get(
                 "source_text",
                 f"{edge.get('source', '')} {edge.get('type', '')} {edge.get('target', '')}",
@@ -608,13 +785,9 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
                     provenance=edge.get("provenance"),
                     temporal_validity_start=temporal_start,
                     temporal_validity_end=temporal_end,
-                    original_edge_type=edge.get(
-                        "type"
-                    ),  # Store the original type before standardization
+                    original_edge_type=edge.get("type"),
                 )
-                if (
-                    edge_obj.source and edge_obj.target
-                ):  # Only add if both source and target exist
+                if edge_obj.source and edge_obj.target:
                     edges.append(edge_obj)
             except Exception as ex:
                 logger.warning(f"Failed to create edge from data {edge}: {ex}")
@@ -638,8 +811,46 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
                     f"Failed to create temporal claim from data {claim_data}: {ex}"
                 )
 
+        tables = []
+        for table_data in data.get("tables", []):
+            try:
+                table = ExtractedTable(
+                    content=table_data.get("content", ""),
+                    page_number=table_data.get("page_number"),
+                    description=table_data.get("description", ""),
+                )
+                if table.content:
+                    tables.append(table)
+            except Exception as ex:
+                logger.warning(f"Failed to create table from data {table_data}: {ex}")
+
+        images_with_text = []
+        for image_data in data.get("images_with_text", []):
+            try:
+                image = ExtractedImage(
+                    description=image_data.get("description", ""),
+                    embedded_text=image_data.get("embedded_text", ""),
+                    page_number=image_data.get("page_number"),
+                )
+                if image.description:
+                    images_with_text.append(image)
+            except Exception as ex:
+                logger.warning(f"Failed to create image from data {image_data}: {ex}")
+
+        figures = []
+        for figure_data in data.get("figures", []):
+            try:
+                figure = ExtractedFigure(
+                    type=figure_data.get("type", "other"),
+                    description=figure_data.get("description", ""),
+                    data_points=figure_data.get("data_points", []),
+                )
+                if figure.description:
+                    figures.append(figure)
+            except Exception as ex:
+                logger.warning(f"Failed to create figure from data {figure_data}: {ex}")
+
         information_density = data.get("information_density", 0.5)
-        # Ensure information density is within bounds
         information_density = max(0.0, min(1.0, information_density))
 
         return ExtractionResult(
@@ -647,48 +858,50 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
             edges=edges,
             temporal_claims=temporal_claims,
             information_density=information_density,
+            tables=tables,
+            images_with_text=images_with_text,
+            figures=figures,
         )
 
     def _merge_results(self, results: list[ExtractionResult]) -> ExtractionResult:
-        """Merge results from multiple passes.
+        """Merge results from multiple passes including multi-modal content.
 
         Args:
             results: List of extraction results.
 
         Returns:
-            Merged extraction result.
+            Merged extraction result with tables, images, and figures consolidated.
         """
         entities: dict[str, ExtractedEntity] = {}
         edges: dict[str, ExtractedEdge] = {}
         all_temporal_claims: list[TemporalClaim] = []
+        all_tables: list[ExtractedTable] = []
+        all_images: list[ExtractedImage] = []
+        all_figures: list[ExtractedFigure] = []
 
         for result in results:
-            # Merge entities
             for entity in result.entities:
                 if entity.name not in entities:
                     entities[entity.name] = entity
                 else:
                     existing = entities[entity.name]
-                    # Update confidence to the maximum of both passes
                     existing.confidence = max(existing.confidence, entity.confidence)
-                    # Merge properties from both passes
                     existing.properties.update(entity.properties)
 
-            # Merge edges
             for edge in result.edges:
                 edge_key = f"{edge.source}|{edge.target}|{edge.edge_type}"
                 if edge_key not in edges:
                     edges[edge_key] = edge
                 else:
                     existing = edges[edge_key]
-                    # Update confidence to the maximum of both passes
                     existing.confidence = max(existing.confidence, edge.confidence)
-                    # Merge properties from both passes
                     existing.properties.update(edge.properties)
 
             all_temporal_claims.extend(result.temporal_claims)
+            all_tables.extend(result.tables)
+            all_images.extend(result.images_with_text)
+            all_figures.extend(result.figures)
 
-        # Deduplicate temporal claims
         seen_claims = set()
         unique_temporal_claims = []
         for claim in all_temporal_claims:
@@ -697,15 +910,11 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
                 seen_claims.add(claim_key)
                 unique_temporal_claims.append(claim)
 
-        # Calculate average information density
         if results:
-            # Use the information density from the last pass as it reflects the remaining density
             final_density = results[-1].information_density
         else:
             final_density = 0.0
 
-        # Analyze relation distribution to identify potential long-tail patterns
-        # Based on 2026 research on optimizing long-tail predictions in document-level relation extraction
         self._analyze_relation_distribution(list(edges.values()))
 
         return ExtractionResult(
@@ -713,4 +922,42 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
             edges=list(edges.values()),
             temporal_claims=unique_temporal_claims,
             information_density=final_density,
+            tables=all_tables,
+            images_with_text=all_images,
+            figures=all_figures,
         )
+
+    def _merge_guided_results(
+        self, results: list[ExtractionResult], domain: str
+    ) -> ExtractionResult:
+        """Merge results from guided extraction with domain focus.
+
+        Args:
+            results: List of extraction results from guided prompts.
+            domain: Domain name for logging.
+
+        Returns:
+            Merged extraction result with domain-specific focus.
+        """
+        logger.info(
+            f"Merging {len(results)} guided extraction results for domain {domain}"
+        )
+
+        if not results:
+            return ExtractionResult()
+
+        merged = self._merge_results(results)
+
+        for entity in merged.entities:
+            entity.properties["domain"] = domain
+            entity.properties["guided_extraction"] = True
+
+        for edge in merged.edges:
+            edge.properties["domain"] = domain
+            edge.properties["guided_extraction"] = True
+
+        logger.info(
+            f"Guided merge complete: {len(merged.entities)} entities, {len(merged.edges)} edges"
+        )
+
+        return merged

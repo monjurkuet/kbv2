@@ -16,6 +16,7 @@ Endpoints:
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from pydantic import BaseModel, Field
@@ -26,6 +27,10 @@ from knowledge_base.common.api_models import APIResponse, PaginatedResponse
 from knowledge_base.common.pagination import PageParams, create_paginated_response
 from knowledge_base.persistence.v1.schema import Document, Chunk, ChunkEntity, Entity
 from knowledge_base.common.offset_service import OffsetCalculationService, TextSpan
+from knowledge_base.storage.hybrid_search import HybridSearchEngine, HybridSearchResult
+from knowledge_base.query_api import get_hybrid_search_engine
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
@@ -120,10 +125,14 @@ class SearchResult(BaseModel):
     chunk_id: str
     score: float = Field(..., ge=0.0, le=1.0, description="Relevance score")
     snippet: str = Field(..., description="Matching text snippet")
-    highlights: List[Dict[str, Any]] = Field(..., description="Highlight regions")
-    entities: List[Dict[str, Any]] = Field(..., description="Matched entities")
+    highlights: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Highlight regions"
+    )
+    entities: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Matched entities"
+    )
     metadata: Dict[str, Any]
-    match_type: str = Field(..., pattern="^(vector|keyword|hybrid)$")
+    match_type: str = Field(..., description="Match type")
 
 
 class DocumentSearchResponse(BaseModel):
@@ -611,44 +620,97 @@ async def search_documents(
 
     start_time = time.time()
 
-    # This is a placeholder implementation
-    # Real implementation would integrate with VectorStore and implement RRF
+    try:
+        engine = get_hybrid_search_engine()
 
-    results = []
-    total_results = 0
+        filters = {}
+        if request.domains:
+            filters["domains"] = request.domains
+        if request.entity_types:
+            filters["entity_types"] = request.entity_types
+        if request.date_from or request.date_to:
+            filters["date_range"] = {
+                "from": request.date_from.isoformat() if request.date_from else None,
+                "to": request.date_to.isoformat() if request.date_to else None,
+            }
 
-    if request.search_type in ["vector", "hybrid"]:
-        # Vector search would go here - using embeddings from VectorStore
-        pass
+        if request.search_type == "vector":
+            vector_weight = 1.0
+            bm25_weight = 0.0
+        elif request.search_type == "keyword":
+            vector_weight = 0.0
+            bm25_weight = 1.0
+        else:
+            vector_weight = 0.7
+            bm25_weight = 0.3
 
-    if request.search_type in ["keyword", "hybrid"]:
-        # Keyword search on entity names would go here
-        pass
+        results = await engine.search(
+            query=request.query,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight,
+            top_k=request.limit,
+            filters=filters if filters else None,
+        )
 
-    took_ms = int((time.time() - start_time) * 1000)
+        search_results = []
+        for r in results:
+            # Handle None values safely
+            text = r.text or ""
+            metadata = r.metadata or {}
 
-    response = DocumentSearchResponse(
-        results=results,
-        total=total_results,
-        query=request.query,
-        took_ms=took_ms,
-        search_type=request.search_type,
-    )
+            # Adapt the source field to the expected values
+            source = r.source
+            if source not in ["vector", "bm25", "hybrid"]:
+                source = "hybrid"
 
-    return APIResponse(
-        success=True,
-        data=response,
-        error=None,
-        metadata={
-            "search_type": request.search_type,
-            "filters_applied": bool(
-                request.domains
-                or request.entity_types
-                or request.date_from
-                or request.date_to
-            ),
-        },
-    )
+            score = r.final_score if hasattr(r, "final_score") else 0.0
+
+            search_results.append(
+                SearchResult(
+                    document_id=metadata.get("document_id", r.id) if metadata else r.id,
+                    chunk_id=r.id,
+                    score=score,
+                    snippet=text[:500],
+                    highlights=[],
+                    entities=[],
+                    metadata=metadata,
+                    match_type=source,
+                )
+            )
+
+        took_ms = int((time.time() - start_time) * 1000)
+
+        response = DocumentSearchResponse(
+            results=search_results,
+            total=len(search_results),
+            query=request.query,
+            took_ms=took_ms,
+            search_type=request.search_type,
+        )
+
+        return APIResponse(
+            success=True,
+            data=response,
+            error=None,
+            metadata={
+                "search_type": request.search_type,
+                "filters_applied": bool(
+                    request.domains
+                    or request.entity_types
+                    or request.date_from
+                    or request.date_to
+                ),
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Search failed: {e}", exc_info=True)
+        return APIResponse(
+            success=False,
+            data=None,
+            error=str(e),
+            metadata={"search_type": request.search_type},
+        )
 
 
 @router.post("/{document_id}/annotations", response_model=APIResponse[W3CAnnotation])

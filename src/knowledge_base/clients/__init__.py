@@ -1,24 +1,36 @@
-"""
-WebSocket clients for KBV2 MCP protocol communication.
+"""Client interfaces for KBV2 LLM interactions."""
 
-This module provides interactive clients for communicating with the KBV2
-Knowledge Base API via the Model Context Protocol (MCP) over WebSocket.
-"""
-
-from knowledge_base.clients.websocket_client import KBV2WebSocketClient
-from knowledge_base.clients.progress import ProgressVisualizer
-from knowledge_base.clients.cli import IngestionCLI
 from knowledge_base.clients.llm_client import (
     LLMClient,
-    create_llm_client,
-    FewShotExample,
+    LLMClientConfig,
+    ChatMessage,
+    LLMRequest,
+    LLMResponse,
     PromptingStrategy,
+    FewShotExample,
+    create_llm_client,
+)
+
+from knowledge_base.clients.rotating_llm_client import (
+    RotatingLLMClient,
+    ModelRotationConfig,
+    create_rotating_llm_client,
+    RECOMMENDED_ROTATIONS,
 )
 
 __all__ = [
-    "KBV2WebSocketClient",
-    "ProgressVisualizer",
-    "IngestionCLI",
+    # Original LLM Client
     "LLMClient",
+    "LLMClientConfig",
+    "ChatMessage",
+    "LLMRequest",
+    "LLMResponse",
+    "PromptingStrategy",
+    "FewShotExample",
     "create_llm_client",
+    # Rotating LLM Client
+    "RotatingLLMClient",
+    "ModelRotationConfig",
+    "create_rotating_llm_client",
+    "RECOMMENDED_ROTATIONS",
 ]

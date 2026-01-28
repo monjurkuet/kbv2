@@ -8,12 +8,20 @@ A high-fidelity information extraction engine that transforms unstructured data 
 - **Verbatim-Grounded Entity Resolution**: Hybrid matching with mandatory grounding quotes
 - **Hierarchical Leiden Clustering**: Macro and Micro community detection
 - **Map-Reduce Recursive Summarization**: Intelligence reports with edge fidelity
-- **Temporal Information Extraction (TIE)**: ISO-8601 normalized temporal claims
+- **Temporal Information Extraction (IE)**: ISO-8601 normalized temporal claims
 - **Natural Language Query Interface**: Translate queries to SQL
 - **Domain Tagging & Filtering**: Propagate domain context throughout pipeline
 - **Human Review Queue**: Flag low-confidence resolutions for manual review
 - **LLM-Based Entity Typing**: Advanced entity classification using language models
 - **Multi-Domain Knowledge Management**: Unified data model across business domains
+- **Hybrid Search (BM25 + Vector)**: Combined keyword and semantic search
+- **Cross-Encoder Reranking**: Improved search result quality
+- **Auto Domain Detection**: Keyword screening + LLM analysis
+- **Multi-Modal Extraction**: Tables, images, figures via modified LLM prompts
+- **Guided Extraction**: Fully automated, domain-specific extraction
+- **Multi-Level Community Summaries**: Hierarchical entity clustering (macro → meso → micro → nano)
+- **Adaptive Type Discovery**: Schema induction from extracted data
+- **Unified Search API**: Single endpoint for all search modes
 
 ## Quick Start
 
@@ -61,11 +69,11 @@ The frontend application has been removed from this repository. The system now p
 
 The system consists of several key components:
 
-1. **Ingestion Pipeline**: Document parsing, chunking, and preprocessing
-2. **Entity Extraction**: LLM-based entity detection and typing
-3. **Graph Management**: Hierarchical clustering and relationship extraction
-4. **Query Engine**: Natural language to SQL translation
-5. **Review System**: Human-in-the-loop quality assurance
+1. **Ingestion Pipeline**: Document parsing, chunking, domain detection
+2. **Entity Extraction**: Multi-agent, gleaning, guided extraction
+3. **Hybrid Search**: BM25 index, vector store, reranking pipeline
+4. **Graph Management**: Hierarchical clustering, community summaries
+5. **Query Engine**: Natural language to SQL, hybrid search, reranking
 
 ## License
 

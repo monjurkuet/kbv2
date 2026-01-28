@@ -30,7 +30,11 @@ dependencies = [
     "sqlparse>=0.5.5",
     "uvicorn[standard]>=0.40.0",
     "rich>=13.0",
+    "nltk>=3.8.0",
     "websockets>=16.0",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=2.2.2",
+    "tenacity>=8.0.0",
 ]
 
 [project.scripts]

@@ -21,6 +21,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx", ".html"}
+
+
+def validate_file_type(file_path: str) -> bool:
+    """Validate that the file has a supported extension.
+
+    Args:
+        file_path: Path to the file to validate.
+
+    Returns:
+        True if the file type is supported.
+
+    Raises:
+        ValueError: If the file type is not supported.
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file type '{ext}'. "
+            f"Supported types: {', '.join(SUPPORTED_EXTENSIONS)}"
+        )
+    return True
+
 
 class IngestionCLI:
     """Command-line interface for document ingestion."""
@@ -60,6 +83,13 @@ class IngestionCLI:
         if not os.path.isfile(file_path):
             logger.error(f"Not a file: {file_path}")
             self.visualizer.error(f"Not a file: {file_path}")
+            return 1
+
+        try:
+            validate_file_type(file_path)
+        except ValueError as e:
+            logger.error(str(e))
+            self.visualizer.error(str(e))
             return 1
 
         file_size = os.path.getsize(file_path)

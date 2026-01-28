@@ -3,6 +3,7 @@
 from typing import Any
 
 import asyncpg
+import numpy as np
 from pgvector.asyncpg import register_vector
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -165,6 +166,11 @@ class VectorStore:
             List of similar entities with similarity scores.
         """
         assert self._pool is not None
+        query_embedding = (
+            query_embedding.tolist()
+            if hasattr(query_embedding, "tolist")
+            else query_embedding
+        )
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -206,6 +212,11 @@ class VectorStore:
             List of similar chunks with similarity scores.
         """
         assert self._pool is not None
+        query_embedding = (
+            query_embedding.tolist()
+            if hasattr(query_embedding, "tolist")
+            else query_embedding
+        )
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -246,7 +257,9 @@ class VectorStore:
             result = await session.execute(select(Entity).where(Entity.id == entity_id))
             entity = result.scalar_one_or_none()
             if entity:
-                entity.embedding = embedding
+                entity.embedding = (
+                    embedding.tolist() if hasattr(embedding, "tolist") else embedding
+                )
                 await session.commit()
 
     async def update_chunk_embedding(
@@ -264,7 +277,9 @@ class VectorStore:
             result = await session.execute(select(Chunk).where(Chunk.id == chunk_id))
             chunk = result.scalar_one_or_none()
             if chunk:
-                chunk.embedding = embedding
+                chunk.embedding = (
+                    embedding.tolist() if hasattr(embedding, "tolist") else embedding
+                )
                 await session.commit()
 
     async def close(self) -> None:

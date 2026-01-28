@@ -7,11 +7,17 @@ functionality following Google AIP standards.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -152,6 +158,25 @@ async def get_openapi():
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
+
+
+# Mount static files for the Windows XP WebSocket client
+# Mount static files for the Windows XP WebSocket client
+import os
+dashboard_version = os.getenv("DASHBOARD_VERSION", "v1")
+base_static_dir = Path(__file__).parent / "static"
+
+if dashboard_version == "v2":
+    static_dir = base_static_dir / "shizuku_xp" / "build"
+else:
+    static_dir = base_static_dir / "v1_legacy"
+
+if not static_dir.exists():
+    # Fallback or just log
+    logger.warning(f"Static directory {static_dir} does not exist. Dashboard may not load.")
+else:
+    logger.info(f"Mounting dashboard version {dashboard_version} from {static_dir}")
+    app.mount("/dashboard", StaticFiles(directory=str(static_dir), html=True), name="static")
 
 
 @app.on_event("startup")
@@ -501,10 +526,12 @@ async def startup_event():
                 )
 
                 for config in DOMAIN_CONFIGS:
+                    # Convert list of EntityTypeDef to dict with type_name as key
+                    entity_types_dict = {et.type_name: et for et in config["entity_types"]}
                     schema = DomainSchemaCreate(
                         domain_name=config["domain_name"],
                         domain_display_name=config["domain_display_name"],
-                        entity_types=config["entity_types"],
+                        entity_types=entity_types_dict,
                         parent_domain_name=config["parent_domain_name"],
                         inheritance_type=config["inheritance_type"],
                         domain_level=DomainLevel.PRIMARY,

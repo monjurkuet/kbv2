@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -25,8 +26,6 @@ from pgvector.sqlalchemy import VECTOR
 
 # Remove Vector class and use VECTOR directly
 
-from datetime import datetime
-from enum import Enum
 from knowledge_base.common.temporal_utils import TemporalType
 
 
@@ -98,12 +97,83 @@ class EdgeType(str, Enum):
     PERFORMS = "performs"
     TARGETS = "targets"
     AFFECTS = "affects"
+    AFFECTS_INVERSE = "affected_by"  # Inverse relation for bidirectional graphs
 
-    # Validity relations (for handling knowledge evolution)
-    INVALIDATED_BY = "invalidated_by"
-    REPLACED_BY = "replaced_by"
-    SUCCEEDED_BY = "succeeded_by"
-    PREDECESSOR_OF = "predecessor_of"
+    # Attribute and characteristic relations (new for 2026)
+    HAS_ATTRIBUTE = "has_attribute"
+    CHARACTERIZED_BY = "characterized_by"
+    EXEMPLIFIES = "exemplifies"
+    ILLUSTRATES = "illustrates"
+    DEMONSTRATES = "demonstrates"
+
+    # Temporal sequence relations (expanding temporal modeling)
+    BEFORE = "before"
+    AFTER = "after"
+    DURING = "during"
+    CONCURRENT_WITH = "concurrent_with"
+    OVERLAPS_WITH = "overlaps_with"
+
+    # Causal relation expansions
+    PREVENTS = "prevents"
+    ENABLES = "enables"
+    CONTRIBUTES_TO = "contributes_to"
+    MITIGATES = "mitigates"
+    EXACERBATES = "exacerbates"
+
+    # Spatial relation expansions (more precise spatial modeling)
+    ADJACENT_TO = "adjacent_to"
+    NEAR = "near"
+    WITHIN = "within"
+    SURROUNDS = "surrounds"
+    CONNECTS_TO = "connects_to"
+
+    # Quantitative relations (for numeric reasoning)
+    GREATER_THAN = "greater_than"
+    LESS_THAN = "less_than"
+    EQUAL_TO = "equal_to"
+    APPROXIMATELY = "approximately"
+    PROPORTIONAL_TO = "proportional_to"
+
+    # Membership and categorization
+    MEMBER_OF = "member_of"
+    AFFILIATED_WITH = "affiliated_with"
+    ASSOCIATED_WITH = "associated_with"
+
+    # Process and transformation
+    TRANSFORMS_INTO = "transforms_into"
+    DERIVES_FROM = "derives_from"
+    EVOLVES_INTO = "evolves_into"
+    PRODUCES = "produces"
+    CONSUMES = "consumes"
+
+    # Future planning and prediction
+    PLANNED_FOR = "planned_for"
+    EXPECTED_TO = "expected_to"
+    INTENDS_TO = "intends_to"
+
+    # Negations and opposites (for handling contradictory information)
+    NOT_RELATED_TO = "not_related_to"
+    CONTRADICTS = "contradicts"
+    OPPOSES = "opposes"
+
+    # Uncertainty and qualification
+    MAY_RELATE_TO = "may_relate_to"
+
+    # Complex relations for knowledge graphs
+    SAME_AS = "same_as"
+    SIMILAR_TO = "similar_to"
+    EQUIVALENT_TO = "equivalent_to"
+    ANALOGOUS_TO = "analogous_to"
+    RELATED_VIA = "related_via"
+
+
+class ReviewStatus(str, Enum):
+    """Review queue status."""
+
+    PENDING = "pending"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class Document(Base):
@@ -129,6 +199,7 @@ class Document(Base):
     chunks = relationship(
         "Chunk", back_populates="document", cascade="all, delete-orphan"
     )
+    review_items = relationship("ReviewQueue", back_populates="document")
 
 
 class Chunk(Base):
@@ -149,14 +220,26 @@ class Chunk(Base):
     token_count = Column(Integer, nullable=True)
     chunk_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    embedding = Column(VECTOR(768), nullable=True)
+    # Using dimension 1024 (perfect for bge-m3 exact match)
+    # Works with bge-m3 (native 1024), smaller models use padding
+    # OpenAI models would need truncation (1536->1024, 3072->1024)
+    embedding = Column(VECTOR(1024), nullable=True)
 
     document = relationship("Document", back_populates="chunks")
     entities = relationship(
         "Entity", secondary="chunk_entities", back_populates="chunks"
     )
 
-    __table_args__ = (Index("idx_chunk_document_index", "document_id", "chunk_index"),)
+    __table_args__ = (
+        Index("idx_chunk_document_index", "document_id", "chunk_index"),
+        Index(
+            "idx_chunk_embedding_ivfflat",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_with={"lists": 100},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
 
 class Entity(Base):
@@ -179,7 +262,10 @@ class Entity(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
-    embedding = Column(VECTOR(768), nullable=True)
+    # Using dimension 1024 (perfect for bge-m3 exact match)
+    # Works with bge-m3 (native 1024), smaller models use padding
+    # OpenAI models would need truncation (1536->1024, 3072->1024)
+    embedding = Column(VECTOR(1024), nullable=True)
     uri = Column(
         String(500), nullable=True, unique=True
     )  # Unique identifier following RDF patterns
@@ -206,6 +292,17 @@ class Entity(Base):
         index=True,
     )
     community = relationship("Community", back_populates="entities")
+    review_items = relationship("ReviewQueue", back_populates="entity")
+
+    __table_args__ = (
+        Index(
+            "idx_entity_embedding_ivfflat",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_with={"lists": 100},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
 
 class Edge(Base):
@@ -259,6 +356,7 @@ class Edge(Base):
         foreign_keys=[target_id],
         back_populates="target_edges",
     )
+    review_items = relationship("ReviewQueue", back_populates="edge")
 
     __table_args__ = (
         Index("idx_edge_source_target", "source_id", "target_id"),
@@ -291,7 +389,12 @@ class Community(Base):
     )
 
     entities = relationship("Entity", back_populates="community")
-    parent = relationship("Community", remote_side=[id])
+    parent = relationship(
+        "Community",
+        remote_side=[id],
+        back_populates="children",
+    )
+    children = relationship("Community", back_populates="parent")
 
 
 class ChunkEntity(Base):
@@ -325,27 +428,12 @@ class ChunkEntity(Base):
 class EntityResolution(BaseModel):
     """Entity resolution result."""
 
-    entity_id: UUID = Field(..., description="Kept entity ID")
-    merged_entity_ids: list[UUID] = Field(
-        default_factory=list, description="Merged entity IDs"
-    )
-    grounding_quote: str = Field(
-        ..., description="Verbatim quote supporting resolution"
-    )
-    confidence_score: float = Field(
-        ..., description="Confidence in resolution", ge=0.0, le=1.0
-    )
-    human_review_required: bool = Field(
-        default=False, description="Flag for manual review"
-    )
-
-
-class ReviewStatus(str, Enum):
-    """Status of review items."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    source_id: str
+    target_id: str
+    confidence: float
+    merged_entity_ids: Optional[list[str]] = None
+    human_review_required: bool = False
+    grounding_quote: Optional[str] = None
 
 
 class ReviewQueue(Base):
@@ -376,9 +464,9 @@ class ReviewQueue(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    entity = relationship("Entity")
-    edge = relationship("Edge")
-    document = relationship("Document")
+    entity = relationship("Entity", back_populates="review_items")
+    edge = relationship("Edge", back_populates="review_items")
+    document = relationship("Document", back_populates="review_items")
 
 
 class TemporalEntityClaim(BaseModel):

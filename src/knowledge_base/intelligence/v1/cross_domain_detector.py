@@ -820,6 +820,51 @@ class CrossDomainDetector:
 
         return filtered
 
+    async def detect_cross_domain_relationships(
+        self,
+        entities: list[dict[str, Any]],
+        edges: list[dict[str, Any]] | None = None,
+        document_domain: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Detect cross-domain relationships for ingestion pipeline integration.
+
+        Args:
+            entities: List of entity dictionaries with id, name, type, domain.
+            edges: Optional list of existing edge dictionaries.
+            document_domain: Optional document domain context.
+
+        Returns:
+            List of cross-domain edge dictionaries ready for persistence.
+        """
+        if not entities or len(entities) < 2:
+            return []
+
+        relationships = self.detect_relationships(entities)
+
+        cross_domain_edges = []
+        for rel in relationships:
+            edge_dict = {
+                "id": str(uuid4()),
+                "source_id": rel.source_entity.get("id"),
+                "target_id": rel.target_entity.get("id"),
+                "edge_type": rel.relationship_type.value,
+                "properties": {
+                    "confidence": rel.confidence,
+                    "evidence": rel.evidence,
+                    "bidirectional": rel.bidirectional,
+                    "source_domain": rel.source_domain.value,
+                    "target_domain": rel.target_domain.value,
+                },
+                "confidence": rel.confidence,
+                "provenance": "cross_domain_detection",
+                "domain": document_domain or "general",
+            }
+            cross_domain_edges.append(edge_dict)
+
+        return cross_domain_edges
+
+        return cross_domain_edges
+
     def get_statistics(
         self,
         relationships: list[CrossDomainRelationship],

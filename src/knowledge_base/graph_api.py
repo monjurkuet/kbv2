@@ -11,6 +11,7 @@ Endpoints follow AIP-136 custom method pattern:
 - GET /api/v1/graphs/{graph_id}:export
 """
 
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 from enum import Enum
@@ -18,6 +19,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from knowledge_base.common.api_models import APIResponse
@@ -26,6 +28,7 @@ from knowledge_base.persistence.v1.graph_store import (
     GraphStore,
     GraphTraversalDirection,
 )
+from knowledge_base.persistence.v1.schema import Entity, Edge
 
 
 router = APIRouter(prefix="/api/v1/graphs", tags=["graph"])
@@ -183,7 +186,9 @@ async def get_graph_summary(
         nodes = []
         for community in communities:
             node_attributes = {
-                "label": community.name or f"Community {community.id}",
+                "label": str(community.name)
+                if community.name
+                else f"Community {community.id}",
                 "x": 0,  # Will be calculated by frontend or from metadata if available
                 "y": 0,
                 "size": community.entity_count or 1,
@@ -193,8 +198,8 @@ async def get_graph_summary(
                 "community_id": str(community.id),
                 "level": level,
                 "entity_count": community.entity_count,
-                "summary": community.summary,
-                "domain": community.domain,
+                "summary": str(community.summary) if community.summary else "",
+                "domain": str(community.domain) if community.domain else "",
             }
 
             # If metadata has pre-calculated coordinates, use them
@@ -573,6 +578,9 @@ async def export_graph(
 
 
 # Helper functions for path finding
+logger = logging.getLogger(__name__)
+
+
 async def _find_shortest_paths(
     store: GraphStore,
     source_id: UUID,
@@ -581,20 +589,94 @@ async def _find_shortest_paths(
     min_confidence: float,
     edge_types: Optional[List[str]],
 ) -> Tuple[List[List[str]], List[float]]:
-    """
-    Find shortest paths between source and target.
+    """Find shortest paths between source and target using igraph."""
+    import igraph
 
-    Simplified BFS implementation - in production would use NetworkX or graph DB.
-    """
-    # This is a placeholder implementation
-    # Real implementation would use NetworkX with the graph data
+    # Get graph data from store
+    nodes_result = await store.db.execute(
+        select(Entity).where(Entity.community_id.isnot(None))
+    )
+    nodes = nodes_result.scalars().all()
 
-    # For demonstration, return empty or simple path
-    if source_id == target_id:
-        return [[str(source_id)]], [1.0]
+    if not nodes:
+        return [], []
 
-    # Would implement actual BFS here
-    return [], []
+    # Build igraph
+    G = igraph.Graph(directed=True)
+
+    # Add vertices
+    node_ids = [str(node.id) for node in nodes]
+    G.add_vertices(node_ids)
+
+    # Add vertex attributes
+    G.vs["name"] = [node.name for node in nodes]
+    G.vs["type"] = [node.entity_type for node in nodes]
+
+    # Get edges
+    edges_result = await store.db.execute(
+        select(Edge).where(
+            Edge.confidence >= min_confidence,
+            Edge.source_id.in_([UUID(nid) for nid in node_ids]),
+            Edge.target_id.in_([UUID(nid) for nid in node_ids]),
+        )
+    )
+    edges = edges_result.scalars().all()
+
+    # Filter by edge types if specified
+    if edge_types:
+        edges = [e for e in edges if e.edge_type in edge_types]
+
+    # Add edges with weights (higher confidence = lower weight)
+    edge_list = []
+    edge_weights = []
+    for edge in edges:
+        if str(edge.source_id) in node_ids and str(edge.target_id) in node_ids:
+            source_idx = node_ids.index(str(edge.source_id))
+            target_idx = node_ids.index(str(edge.target_id))
+            edge_list.append((source_idx, target_idx))
+            edge_weights.append(1.0 - edge.confidence)
+
+    G.add_edges(edge_list)
+    G.es["weight"] = edge_weights
+    G.es["confidence"] = [1.0 - w for w in edge_weights]
+
+    # Find shortest paths
+    try:
+        paths = G.get_shortest_paths(
+            str(source_id), str(target_id), weights="weight", mode="OUT"
+        )
+
+        # Convert to node ID strings and calculate path confidence
+        result_paths = []
+        confidences = []
+
+        for path in paths:
+            if 0 < len(path) <= max_hops + 1:
+                path_ids = [node_ids[i] for i in path]
+                result_paths.append(path_ids)
+
+                # Calculate average confidence for this path
+                if len(path) > 1:
+                    path_edges = []
+                    for i in range(len(path) - 1):
+                        e = G.es.select(_source=path[i], _target=path[i + 1])
+                        if e:
+                            path_edges.append(e[0])
+                    if path_edges:
+                        avg_confidence = sum(e["confidence"] for e in path_edges) / len(
+                            path_edges
+                        )
+                    else:
+                        avg_confidence = 1.0
+                else:
+                    avg_confidence = 1.0
+                confidences.append(avg_confidence)
+
+        return result_paths, confidences
+
+    except Exception as e:
+        logger.error(f"Shortest path finding failed: {e}")
+        return [], []
 
 
 async def _find_all_simple_paths(
@@ -605,9 +687,91 @@ async def _find_all_simple_paths(
     min_confidence: float,
     edge_types: Optional[List[str]],
 ) -> Tuple[List[List[str]], List[float]]:
-    """Find all simple paths between source and target."""
-    # Placeholder - real implementation would use NetworkX
-    return [], []
+    """Find all simple paths between source and target using igraph."""
+    import igraph
+
+    # Get graph data from store
+    nodes_result = await store.db.execute(
+        select(Entity).where(Entity.community_id.isnot(None))
+    )
+    nodes = nodes_result.scalars().all()
+
+    if not nodes:
+        return [], []
+
+    # Build igraph
+    G = igraph.Graph(directed=True)
+
+    # Add vertices
+    node_ids = [str(node.id) for node in nodes]
+    G.add_vertices(node_ids)
+
+    # Add vertex attributes
+    G.vs["name"] = [node.name for node in nodes]
+    G.vs["type"] = [node.entity_type for node in nodes]
+
+    # Get edges
+    edges_result = await store.db.execute(
+        select(Edge).where(
+            Edge.confidence >= min_confidence,
+            Edge.source_id.in_([UUID(nid) for nid in node_ids]),
+            Edge.target_id.in_([UUID(nid) for nid in node_ids]),
+        )
+    )
+    edges = edges_result.scalars().all()
+
+    # Filter by edge types if specified
+    if edge_types:
+        edges = [e for e in edges if e.edge_type in edge_types]
+
+    # Add edges with confidence as attribute
+    edge_list = []
+    edge_confidences = []
+    for edge in edges:
+        if str(edge.source_id) in node_ids and str(edge.target_id) in node_ids:
+            source_idx = node_ids.index(str(edge.source_id))
+            target_idx = node_ids.index(str(edge.target_id))
+            edge_list.append((source_idx, target_idx))
+            edge_confidences.append(edge.confidence)
+
+    G.add_edges(edge_list)
+    G.es["confidence"] = edge_confidences
+
+    # Find all simple paths
+    try:
+        paths = G.get_all_simple_paths(str(source_id), str(target_id))
+
+        # Convert to node ID strings and calculate path confidence
+        result_paths = []
+        confidences = []
+
+        for path in paths:
+            if len(path) > 0:
+                path_ids = [node_ids[i] for i in path]
+                result_paths.append(path_ids)
+
+                # Calculate average confidence for this path
+                if len(path) > 1:
+                    path_edges = []
+                    for i in range(len(path) - 1):
+                        e = G.es.select(_source=path[i], _target=path[i + 1])
+                        if e:
+                            path_edges.append(e[0])
+                    if path_edges:
+                        avg_confidence = sum(e["confidence"] for e in path_edges) / len(
+                            path_edges
+                        )
+                    else:
+                        avg_confidence = 1.0
+                else:
+                    avg_confidence = 1.0
+                confidences.append(avg_confidence)
+
+        return result_paths, confidences
+
+    except Exception as e:
+        logger.error(f"All simple paths finding failed: {e}")
+        return [], []
 
 
 async def _find_most_confident_paths(
@@ -618,6 +782,118 @@ async def _find_most_confident_paths(
     min_confidence: float,
     edge_types: Optional[List[str]],
 ) -> Tuple[List[List[str]], List[float]]:
-    """Find paths with highest confidence scores."""
-    # Placeholder - real implementation would use weighted graph algorithms
-    return [], []
+    """Find paths with highest confidence scores using igraph."""
+    import igraph
+
+    # Get graph data from store
+    nodes_result = await store.db.execute(
+        select(Entity).where(Entity.community_id.isnot(None))
+    )
+    nodes = nodes_result.scalars().all()
+
+    if not nodes:
+        return [], []
+
+    # Build igraph
+    G = igraph.Graph(directed=True)
+
+    # Add vertices
+    node_ids = [str(node.id) for node in nodes]
+    G.add_vertices(node_ids)
+
+    # Add vertex attributes
+    G.vs["name"] = [node.name for node in nodes]
+    G.vs["type"] = [node.entity_type for node in nodes]
+
+    # Get edges
+    edges_result = await store.db.execute(
+        select(Edge).where(
+            Edge.confidence >= min_confidence,
+            Edge.source_id.in_([UUID(nid) for nid in node_ids]),
+            Edge.target_id.in_([UUID(nid) for nid in node_ids]),
+        )
+    )
+    edges = edges_result.scalars().all()
+
+    # Filter by edge types if specified
+    if edge_types:
+        edges = [e for e in edges if e.edge_type in edge_types]
+
+    # Add edges with weights (higher confidence = lower weight)
+    edge_list = []
+    edge_weights = []
+    edge_confidences = []
+    for edge in edges:
+        if str(edge.source_id) in node_ids and str(edge.target_id) in node_ids:
+            source_idx = node_ids.index(str(edge.source_id))
+            target_idx = node_ids.index(str(edge.target_id))
+            edge_list.append((source_idx, target_idx))
+            # Use inverse of confidence as weight (higher confidence = lower weight)
+            weight = 1.0 - edge.confidence
+            edge_weights.append(weight)
+            edge_confidences.append(edge.confidence)
+
+    G.add_edges(edge_list)
+    G.es["weight"] = edge_weights
+    G.es["confidence"] = edge_confidences
+
+    # Find shortest paths using confidence-based weights
+    try:
+        paths = G.get_shortest_paths(
+            str(source_id), str(target_id), weights="weight", mode="OUT"
+        )
+
+        # Get all simple paths as well to find alternative confident paths (without cutoff parameter)
+        all_paths = G.get_all_simple_paths(str(source_id), str(target_id))
+
+        # Combine and rank by confidence
+        combined_paths = []
+        path_confidences = []
+
+        # Add shortest paths
+        for path in paths:
+            if 0 < len(path) <= max_hops + 1:
+                combined_paths.append(path)
+
+        # Add all simple paths
+        for path in all_paths:
+            if 0 < len(path) <= max_hops + 1 and path not in combined_paths:
+                combined_paths.append(path)
+
+        # Calculate confidence for each path and sort
+        scored_paths = []
+        for path in combined_paths:
+            path_ids = [node_ids[i] for i in path]
+
+            # Calculate average confidence for this path
+            if len(path) > 1:
+                path_edges = []
+                for i in range(len(path) - 1):
+                    e = G.es.select(_source=path[i], _target=path[i + 1])
+                    if e:
+                        path_edges.append(e[0])
+                if path_edges:
+                    min_edge_conf = min(e["confidence"] for e in path_edges)
+                    avg_confidence = sum(e["confidence"] for e in path_edges) / len(
+                        path_edges
+                    )
+                    # Combine min and average confidence
+                    path_confidence = 0.7 * min_edge_conf + 0.3 * avg_confidence
+                else:
+                    path_confidence = 1.0
+            else:
+                path_confidence = 1.0
+
+            scored_paths.append((path_ids, path_confidence))
+
+        # Sort by confidence (descending) and return top paths
+        scored_paths.sort(key=lambda x: x[1], reverse=True)
+
+        result_paths = [sp[0] for sp in scored_paths]
+        confidences = [sp[1] for sp in scored_paths]
+
+        return result_paths, confidences
+
+    except Exception as e:
+        logger.error(f"Most confident paths finding failed: {e}")
+        return [], []

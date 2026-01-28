@@ -1,5 +1,7 @@
 """Local LLM Gateway Client."""
 
+import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Type
 
@@ -12,7 +14,16 @@ from knowledge_base.clients import (
     FewShotExample,
     PromptingStrategy,
     LLMClient,
+    RotatingLLMClient,
 )
+from knowledge_base.clients.model_registry import (
+    ModelRegistry,
+    ModelRegistryConfig,
+    ModelRegistryManager,
+    get_model_registry,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayConfig(BaseSettings):
@@ -211,6 +222,9 @@ class EnhancedGateway(GatewayClient):
         """
         super().__init__(config)
         self._llm_client: LLMClient | None = None
+        self._rotating_client: RotatingLLMClient | None = None
+        self._model_registry: ModelRegistry | None = None
+        self._failed_models: set[str] = set()
 
     async def _get_llm_client(self) -> LLMClient:
         """Get or create LLM client.
@@ -227,6 +241,157 @@ class EnhancedGateway(GatewayClient):
                 max_tokens=self._config.max_tokens,
             )
         return self._llm_client
+
+    async def _get_rotating_client(self) -> RotatingLLMClient:
+        """Get or create rotating LLM client.
+
+        Returns:
+            Rotating LLM client instance.
+        """
+        if self._rotating_client is None:
+            from knowledge_base.clients.llm_client import LLMClientConfig
+
+            client_config = LLMClientConfig(
+                base_url=self._config.url,
+                api_key=self._config.api_key,
+                model=self._config.model,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
+                timeout=self._config.timeout,
+            )
+            self._rotating_client = RotatingLLMClient(client_config)
+            await self._refresh_models()
+        return self._rotating_client
+
+    async def _get_model_registry(self) -> ModelRegistry:
+        """Get or create model registry.
+
+        Returns:
+            Model registry instance.
+        """
+        if self._model_registry is None:
+            registry_config = ModelRegistryConfig(
+                gateway_url=self._config.url.rstrip("/").replace("/v1", ""),
+                timeout=self._config.timeout,
+            )
+            self._model_registry = await ModelRegistryManager.get_registry(
+                registry_config
+            )
+        return self._model_registry
+
+    async def _refresh_models(self) -> None:
+        """Refresh the rotating client's model list from the registry."""
+        try:
+            registry = await self._get_model_registry()
+            rotation_models = await registry.get_rotation_list()
+
+            if rotation_models:
+                model_names = [
+                    model.id
+                    for model in rotation_models
+                    if model.id not in self._failed_models
+                ]
+                if model_names:
+                    self._rotating_client.set_models(model_names)
+                    logger.info(f"Updated rotation list with {len(model_names)} models")
+        except Exception as e:
+            logger.warning(f"Failed to refresh models: {e}")
+
+    async def call_llm(self, **kwargs: Any) -> dict[str, Any]:
+        """Call LLM with automatic model rotation on rate limits.
+
+        Args:
+            **kwargs: Arguments to pass to the LLM client.
+                Common args: prompt, messages, model, temperature, max_tokens,
+                response_format, strategy, few_shot_examples, etc.
+
+        Returns:
+            Dictionary containing response data with model used.
+
+        Raises:
+            Exception: If all models fail or a non-rate-limit error occurs.
+        """
+        rotating_client = await self._get_rotating_client()
+
+        try:
+            response = await rotating_client.chat_completion(**kwargs)
+
+            return {
+                "content": response.content,
+                "model": response.model,
+                "usage": response.usage,
+                "success": True,
+            }
+
+        except Exception as e:
+            error_msg = str(e).lower()
+
+            if self._is_rate_limit_error(e) or any(
+                indicator in error_msg
+                for indicator in [
+                    "429",
+                    "too many requests",
+                    "rate limit",
+                    "quota exceeded",
+                ]
+            ):
+                logger.warning(f"Rate limit detected: {e}")
+
+                if hasattr(e, "model") and e.model:
+                    self._failed_models.add(str(e.model))
+                    await self._mark_model_unhealthy(str(e.model))
+
+                await self._refresh_models()
+
+                await asyncio.sleep(5.0)
+
+                try:
+                    response = await rotating_client.chat_completion(**kwargs)
+                    return {
+                        "content": response.content,
+                        "model": response.model,
+                        "usage": response.usage,
+                        "success": True,
+                        "retried": True,
+                    }
+                except Exception as retry_error:
+                    logger.error(f"Retry failed: {retry_error}")
+                    return {
+                        "error": str(retry_error),
+                        "success": False,
+                    }
+            else:
+                logger.error(f"Non-rate-limit error: {e}")
+                return {
+                    "error": str(e),
+                    "success": False,
+                }
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        """Check if error is a rate limit error.
+
+        Args:
+            error: The exception to check.
+
+        Returns:
+            True if the error is a rate limit error.
+        """
+        if hasattr(error, "response") and hasattr(error.response, "status_code"):
+            return error.response.status_code == 429
+        return False
+
+    async def _mark_model_unhealthy(self, model_id: str) -> None:
+        """Mark a model as unhealthy in the registry.
+
+        Args:
+            model_id: The model identifier.
+        """
+        try:
+            registry = await self._get_model_registry()
+            registry.mark_model_unhealthy(model_id)
+            logger.warning(f"Marked model {model_id} as unhealthy")
+        except Exception as e:
+            logger.error(f"Failed to mark model unhealthy: {e}")
 
     async def extract_with_reasoning(self, prompt: str) -> dict[str, Any]:
         """Use Chain-of-Thought for complex extractions.
@@ -255,13 +420,14 @@ class EnhancedGateway(GatewayClient):
         return {"answer": answer, "steps": [s.model_dump() for s in steps]}
 
     async def extract_structured(
-        self, prompt: str, schema: Type[BaseModel]
+        self, prompt: str, schema: Type[BaseModel], json_mode: bool = False
     ) -> BaseModel:
         """Extract with structured JSON output.
 
         Args:
             prompt: Extraction prompt.
             schema: Pydantic schema for response.
+            json_mode: Whether to request JSON output format.
 
         Returns:
             Parsed instance of schema.
@@ -270,7 +436,7 @@ class EnhancedGateway(GatewayClient):
         json_data = await client.complete_json(
             prompt=prompt,
             strategy=PromptingStrategy.STANDARD,
-            json_mode=True,
+            json_mode=json_mode,
         )
         return schema.model_validate(json_data)
 
