@@ -77,8 +77,8 @@ class VectorStore:
             expire_on_commit=False,
         )
 
-        await self._create_tables()
         await self._setup_pgvector()
+        await self._create_tables()
 
         print("Vector store initialized with pgvector support")
 
@@ -250,6 +250,56 @@ class VectorStore:
             )
 
             return [dict(row) for row in rows]
+
+    async def update_entity_embeddings_batch(
+        self,
+        updates: list[tuple[str, list[float]]],
+    ) -> None:
+        """Update multiple entity embeddings in a single transaction.
+
+        Args:
+            updates: List of (entity_id, embedding) tuples.
+        """
+        if not updates:
+            return
+
+        async with self._session_factory() as session:
+            for entity_id, embedding in updates:
+                # Use a more efficient update if possible, but stay within SQLAlchemy for safety
+                # For high performance, we could use a raw asyncpg update with executemany
+                result = await session.execute(
+                    select(Entity).where(Entity.id == entity_id)
+                )
+                entity = result.scalar_one_or_none()
+                if entity:
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+                    entity.embedding = embedding
+            await session.commit()
+
+    async def update_chunk_embeddings_batch(
+        self,
+        updates: list[tuple[str, list[float]]],
+    ) -> None:
+        """Update multiple chunk embeddings in a single transaction.
+
+        Args:
+            updates: List of (chunk_id, embedding) tuples.
+        """
+        if not updates:
+            return
+
+        async with self._session_factory() as session:
+            for chunk_id, embedding in updates:
+                result = await session.execute(
+                    select(Chunk).where(Chunk.id == chunk_id)
+                )
+                chunk = result.scalar_one_or_none()
+                if chunk:
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+                    chunk.embedding = embedding
+            await session.commit()
 
     async def update_entity_embedding(
         self,

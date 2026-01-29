@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -164,7 +165,7 @@ class EmbeddingClient:
         self,
         texts: list[str],
     ) -> list[list[float]]:
-        """Embed multiple texts using Ollama.
+        """Embed multiple texts using Ollama in parallel.
 
         Args:
             texts: Texts to embed.
@@ -172,33 +173,38 @@ class EmbeddingClient:
         Returns:
             List of embedding vectors.
         """
-        client = await self._get_client()
-        all_embeddings: list[list[float]] = []
+        if not texts:
+            return []
 
-        # Ollama processes one text per request (or batch)
-        headers = {
-            "Content-Type": "application/json",
-        }
+        # Use a semaphore to limit concurrency to avoid overwhelming Ollama
+        semaphore = asyncio.Semaphore(10)
 
-        for text in texts:
-            try:
-                # Clean text to remove non-printable characters that cause URL errors
-                clean_text = text.replace('\r', '').replace('\n', ' ').strip()
+        async def _embed_safe(text: str) -> list[float]:
+            async with semaphore:
+                try:
+                    # Clean text to remove non-printable characters
+                    clean_text = text.replace("\r", "").replace("\n", " ").strip()
+                    if not clean_text:
+                        return [0.0] * self._dimensions
 
-                embedding = await self._embed_with_retry(clean_text)
+                    embedding = await self._embed_with_retry(clean_text)
 
-                # bge-m3 produces exactly 1024 dimensions, no truncation/padding needed
-                if len(embedding) != self._dimensions:
-                    logger.warning(
-                        f"Embedding dimension mismatch: expected {self._dimensions}, got {len(embedding)}"
-                    )
-                
-                all_embeddings.append(embedding)
-            except Exception as e:
-                logger.error(f"Failed to embed text: {e}")
-                all_embeddings.append([0.0] * self._dimensions)
+                    # bge-m3 produces exactly 1024 dimensions
+                    if len(embedding) != self._dimensions:
+                        logger.warning(
+                            f"Embedding dimension mismatch: expected {self._dimensions}, got {len(embedding)}"
+                        )
 
-        return all_embeddings
+                    return embedding
+                except Exception as e:
+                    logger.error(f"Failed to embed text: {e}")
+                    return [0.0] * self._dimensions
+
+        # Execute all tasks in parallel
+        tasks = [_embed_safe(text) for text in texts]
+        all_embeddings = await asyncio.gather(*tasks)
+
+        return list(all_embeddings)
 
     async def embed_texts(
         self,

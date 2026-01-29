@@ -340,7 +340,7 @@ class IngestionOrchestrator:
 
         return scores
 
-    def _determine_domain(
+    async def _determine_domain(
         self, document: Document, content_text: str | None = None
     ) -> str:
         """Determine domain for a document based on its content or metadata.
@@ -359,11 +359,8 @@ class IngestionOrchestrator:
         if document.doc_metadata and "domain" in document.doc_metadata:
             return str(document.doc_metadata["domain"]).upper()
 
-        if content_text and self._domain_detector:
-            import asyncio
-
             try:
-                result = asyncio.run(self._domain_detector.detect_domain(content_text))
+                result = await self._domain_detector.detect_domain(content_text)
                 if result.primary_domain:
                     return result.primary_domain
             except Exception:
@@ -430,8 +427,8 @@ class IngestionOrchestrator:
                         text=chunk_data.text,
                         chunk_index=idx,
                         page_number=chunk_data.page_number,
-                        token_count=len(chunk_data.text.split()),
-                        metadata=chunk_data.metadata,
+                        token_count=chunk_data.token_count,
+                        chunk_metadata=chunk_data.metadata,
                     )
                     session.add(chunk)
 
@@ -494,17 +491,40 @@ class IngestionOrchestrator:
                         ) = await self._extract_entities_multi_agent(
                             document=document,
                             content_text="",
-                            domain=self._determine_domain(document),
+                            domain=await self._determine_domain(document),
                             recommendation=recommendation,
                         )
 
                         if quality_score and quality_score.overall_score >= 0.5:
                             multi_agent_success = True
 
+                            # Deduplicate entities by URI
+                            uri_to_id: dict[str, UUID] = {}
+                            unique_entities = []
+
                             for entity in entities:
-                                session.add(entity)
+                                if entity.uri in uri_to_id:
+                                    # Already saw this entity in this multi-agent extraction
+                                    continue
+
+                                # Query for existing entity with same URI in database
+                                result = await session.execute(
+                                    select(Entity).where(Entity.uri == entity.uri)
+                                )
+                                existing = result.scalar_one_or_none()
+
+                                if existing:
+                                    uri_to_id[entity.uri] = existing.id
+                                    # Update extraction entities to use the existing ID for edge mapping
+                                    entity.id = existing.id
+                                else:
+                                    session.add(entity)
+                                    uri_to_id[entity.uri] = entity.id
+                                    unique_entities.append(entity)
+
                             await session.flush()
 
+                            # Map edges using potentially updated IDs from deduplication
                             for edge in edges:
                                 if (
                                     edge.source_id
@@ -553,6 +573,9 @@ class IngestionOrchestrator:
                         )
 
                 if not multi_agent_success:
+                    # Cache for entities seen during gleaning to avoid redundant DB queries and URI violations
+                    known_uri_to_id: dict[str, UUID] = {}
+
                     for chunk in chunks:
                         try:
                             chunk_text = (
@@ -569,65 +592,53 @@ class IngestionOrchestrator:
                                 if isinstance(chunk.id, UUID)
                                 else UUID(str(chunk.id))
                             )
-                            entities = self._create_entities_from_extraction(
+                            extracted_entities = self._create_entities_from_extraction(
                                 extraction, chunk_uuid
                             )
 
-                            inserted_entity_ids: set[UUID] = set()
+                            chunk_unique_entity_ids: set[UUID] = set()
 
-                            for entity in entities:
-                                try:
-                                    existing_entity = None
-                                    if getattr(entity, "uri", None) and isinstance(
-                                        getattr(entity, "uri", None), str
-                                    ):
-                                        result = await session.execute(
-                                            select(Entity).where(
-                                                Entity.uri == entity.uri
-                                            )
-                                        )
-                                        existing_entity = result.scalar_one_or_none()
+                            for entity in extracted_entities:
+                                if entity.uri in known_uri_to_id:
+                                    target_id = known_uri_to_id[entity.uri]
+                                    entity.id = target_id
+                                    chunk_unique_entity_ids.add(target_id)
+                                    continue
 
-                                    if existing_entity:
-                                        inserted_entity_ids.add(existing_entity.id)
-                                        entity.id = existing_entity.id
-                                    else:
-                                        session.add(entity)
-                                        await session.flush()
-                                        inserted_entity_ids.add(entity.id)
-
-                                except Exception:
-                                    pass
-
-                            if len(inserted_entity_ids) < len(entities):
-                                existing_entities = await session.execute(
-                                    select(Entity.id).where(
-                                        Entity.name.in_(
-                                            [
-                                                e.name
-                                                for e in entities
-                                                if e.id not in inserted_entity_ids
-                                            ]
-                                        )
-                                    )
+                                # Check database for existing entity by URI
+                                result = await session.execute(
+                                    select(Entity).where(Entity.uri == entity.uri)
                                 )
-                                for row in existing_entities.scalars():
-                                    inserted_entity_ids.add(row)
+                                existing = result.scalar_one_or_none()
 
-                            for entity in entities:
-                                if entity.id in inserted_entity_ids:
-                                    chunk_entity = ChunkEntity(
-                                        chunk_id=chunk.id, entity_id=entity.id
-                                    )
-                                    session.add(chunk_entity)
+                                if existing:
+                                    known_uri_to_id[entity.uri] = existing.id
+                                    entity.id = existing.id
+                                    chunk_unique_entity_ids.add(existing.id)
+                                else:
+                                    session.add(entity)
+                                    # Flush to ensure entity is persisted before next chunk
+                                    # This avoids violations if the next chunk has the same entity
+                                    await session.flush()
+                                    known_uri_to_id[entity.uri] = entity.id
+                                    chunk_unique_entity_ids.add(entity.id)
 
+                            # Map entities to this chunk
+                            for entity_id in chunk_unique_entity_ids:
+                                chunk_entity = ChunkEntity(
+                                    chunk_id=chunk.id, entity_id=entity_id
+                                )
+                                session.add(chunk_entity)
+
+                            # Create and add edges
                             edges = self._create_edges_from_extraction(
-                                extraction, entities
+                                extraction, extracted_entities
                             )
                             for edge in edges:
                                 if (
-                                    edge.source_id in inserted_entity_ids
-                                    and edge.target_id in inserted_entity_ids
+                                    edge.source_id
+                                    and edge.target_id
+                                    and edge.source_id != edge.target_id
                                 ):
                                     session.add(edge)
 
@@ -678,7 +689,7 @@ class IngestionOrchestrator:
                             for e in existing_edges
                         ]
 
-                        document_domain = self._determine_domain(document)
+                        document_domain = await self._determine_domain(document)
                         cross_domain_edges = await self._cross_domain_detector.detect_cross_domain_relationships(
                             entities=entities_data,
                             edges=edges_data,
@@ -1674,7 +1685,7 @@ class IngestionOrchestrator:
                     8, "started", "Updating domain for document and entities"
                 )
                 final_domain = (
-                    domain if domain is not None else self._determine_domain(document)
+                    domain if domain is not None else await self._determine_domain(document)
                 )
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
@@ -1828,21 +1839,23 @@ class IngestionOrchestrator:
 
             if chunk_texts:
                 chunk_embeddings = await self._embedding_client.embed_batch(chunk_texts)
-                for chunk, embedding in zip(chunks, chunk_embeddings):
-                    if embedding:
-                        await self._vector_store.update_chunk_embedding(
-                            str(chunk.id), embedding
-                        )
+                chunk_updates = [
+                    (str(chunk.id), embedding)
+                    for chunk, embedding in zip(chunks, chunk_embeddings)
+                    if embedding
+                ]
+                await self._vector_store.update_chunk_embeddings_batch(chunk_updates)
 
             if entity_texts:
                 entity_embeddings = await self._embedding_client.embed_batch(
                     entity_texts
                 )
-                for entity, embedding in zip(entities, entity_embeddings):
-                    if embedding:
-                        await self._vector_store.update_entity_embedding(
-                            str(entity.id), embedding
-                        )
+                entity_updates = [
+                    (str(entity.id), embedding)
+                    for entity, embedding in zip(entities, entity_embeddings)
+                    if embedding
+                ]
+                await self._vector_store.update_entity_embeddings_batch(entity_updates)
 
             obs.log_metric(
                 "entities_embedded", len(entities), document_id=str(document.id)

@@ -154,20 +154,44 @@ Respond with ONLY the JSON, no markdown or explanations."""
                 content = response["choices"][0]["message"]["content"]
 
             # Parse JSON response
+            json_match = {}
             try:
-                # Try to extract JSON if wrapped in markdown
+                # First try direct parsing
                 json_match = json.loads(content)
             except json.JSONDecodeError:
-                # Clean common markdown wrappers
-                content = content.strip()
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
-                json_match = json.loads(content)
+                # Clean thought/reasoning tags if present (e.g., <think> or <thought>)
+                import re
+                
+                # Strip anything between <thought>...</thought> or <think>...</think>
+                cleaned_content = re.sub(r"<(thought|think)>.*?</\1>", "", content, flags=re.DOTALL)
+                
+                # Strip remaining opening/closing tags if they were unclosed
+                cleaned_content = re.sub(r"<(thought|think)>.*", "", cleaned_content, flags=re.DOTALL)
+                
+                # Extract JSON from markdown blocks if present
+                json_blocks = re.findall(r"```json\s*(.*?)\s*```", cleaned_content, re.DOTALL)
+                if json_blocks:
+                    cleaned_content = json_blocks[0]
+                else:
+                    # Try general code blocks
+                    code_blocks = re.findall(r"```\s*(.*?)\s*```", cleaned_content, re.DOTALL)
+                    if code_blocks:
+                        cleaned_content = code_blocks[0]
+                
+                # Final attempt to find anything that looks like a JSON object
+                if not json_blocks and not code_blocks:
+                    # Look for first { and last }
+                    start = cleaned_content.find("{")
+                    end = cleaned_content.rfind("}")
+                    if start != -1 and end != -1:
+                        cleaned_content = cleaned_content[start : end + 1]
+                
+                cleaned_content = cleaned_content.strip()
+                try:
+                    json_match = json.loads(cleaned_content)
+                except json.JSONDecodeError as decode_err:
+                    logger.error(f"Failed to parse LLM response after cleaning: {cleaned_content[:200]}...")
+                    raise decode_err
 
             recommendation = PipelineRecommendation(
                 complexity=DocumentComplexity(json_match["complexity"]),

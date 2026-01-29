@@ -200,6 +200,14 @@ class KBV2WebSocketClient:
                 progress_update = ProgressUpdate(**data)
                 if self.progress_callback:
                     self.progress_callback(progress_update)
+            elif message_type == "extraction_log":
+                logger.info(
+                    f"Received extraction log: event_type={data.get('event_type')}"
+                )
+                # You might want a separate callback for logs, but for now we just log them
+                # to avoid them falling into the 'else' block
+            elif not request_id and message_type:
+                logger.info(f"Received notification of type: {message_type}")
             else:
                 logger.info(f"Received response for request_id={request_id}")
                 if request_id and request_id in self.pending_requests:

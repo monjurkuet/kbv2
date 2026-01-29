@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_base.common.gateway import GatewayClient
@@ -28,6 +28,25 @@ class MicroReport(BaseModel):
     key_relationships: list[str] = Field(
         default_factory=list, description="Key relationships"
     )
+
+    @field_validator("key_entities", "key_relationships", mode="before")
+    @classmethod
+    def stringify_items(cls, v):
+        """Ensure all items in lists are strings."""
+        if not isinstance(v, list):
+            return v
+        
+        processed = []
+        for item in v:
+            if isinstance(item, dict):
+                # Convert dict to a readable string representation
+                items = []
+                for key, value in item.items():
+                    items.append(f"{key}: {value}")
+                processed.append(" | ".join(items))
+            else:
+                processed.append(str(item))
+        return processed
 
 
 class MacroReport(BaseModel):
