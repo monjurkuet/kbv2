@@ -173,7 +173,26 @@ Examples:
   %(prog)s ingest /path/to/document.md
   %(prog)s ingest /path/to/document.md --name "My Document" --domain "technical"
   %(prog)s ingest /path/to/document.md --host localhost --port 8765 --verbose
+  %(prog)s dedupe --host localhost
         """,
+    )
+
+    parser.add_argument(
+        "--host",
+        default="localhost",
+        help="KBV2 server host (default: localhost)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="KBV2 server port (default: 8765)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show detailed progress information",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -193,33 +212,21 @@ Examples:
         help="Optional document domain (e.g., 'technical', 'finance', 'medical')",
     )
     ingest_parser.add_argument(
-        "--host",
-        default="localhost",
-        help="KBV2 server host (default: localhost)",
-    )
-    ingest_parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="KBV2 server port (default: 8765)",
-    )
-    ingest_parser.add_argument(
         "--timeout",
         type=float,
         default=3600.0,
         help="Request timeout in seconds (default: 3600 = 1 hour)",
     )
     ingest_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show detailed progress information",
-    )
-    ingest_parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
         help="Suppress progress output",
+    )
+
+    # Deduplicate command
+    subparsers.add_parser(
+        "dedupe", help="Trigger global entity deduplication sweep"
     )
 
     return parser.parse_args()
@@ -245,6 +252,24 @@ def main() -> int:
         cli = IngestionCLI(args)
         try:
             return asyncio.run(cli.run())
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user")
+            return 130
+    elif args.command == "dedupe":
+        async def run_dedupe():
+            async with KBV2WebSocketClient(host=args.host, port=args.port) as client:
+                print("Starting global entity deduplication sweep...")
+                response = await client.deduplicate_entities()
+                if response.error:
+                    print(f"Error: {response.error}")
+                    return 1
+                else:
+                    print("Deduplication complete!")
+                    print(f"Results: {response.result}")
+                    return 0
+        
+        try:
+            return asyncio.run(run_dedupe())
         except KeyboardInterrupt:
             print("\n\nInterrupted by user")
             return 130

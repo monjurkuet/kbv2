@@ -188,6 +188,7 @@ class KBV2MCPProtocol(MCPProtocol):
             "kbv2/search_entities": self._handle_search_entities,
             "kbv2/search_chunks": self._handle_search_chunks,
             "kbv2/get_document_status": self._handle_get_document_status,
+            "kbv2/deduplicate_entities": self._handle_deduplicate_entities,
         }
 
         if request.method in method_handlers:
@@ -430,6 +431,18 @@ class KBV2MCPProtocol(MCPProtocol):
             "status": "not_implemented",
             "progress": 0,
         }
+
+    async def _handle_deduplicate_entities(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle global entity deduplication request.
+
+        Args:
+            params: Empty parameters.
+
+        Returns:
+            Dictionary with deduplication results.
+        """
+        result = await self.orchestrator.global_deduplicate_entities()
+        return result
 
 
 # Create FastAPI app and MCP protocol instance

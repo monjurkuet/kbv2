@@ -4,9 +4,12 @@
 
 ```bash
 # Fastest way - CLI with all features enabled
-python -m knowledge_base.clients.cli ingest /path/to/document.md \
+uv run python -m knowledge_base.clients.cli ingest /path/to/document.md \
   --name "My Document" \
   --domain "technology"
+
+# Maintain knowledge base health - Global deduplication
+uv run python -m knowledge_base.clients.cli dedupe
 ```
 
 ## 📋 All 15 Pipeline Stages (Auto-Enabled)
@@ -18,7 +21,7 @@ python -m knowledge_base.clients.cli ingest /path/to/document.md \
 5. ✅ **Guided Extraction** (NEW - fully automated, domain-specific)
 6. ✅ Multi-agent extraction
 7. ✅ Embedding generation (with batching for performance)
-8. ✅ Entity resolution
+8. ✅ **Global Entity Resolution** (Cross-document deduplication)
 9. ✅ Entity clustering
 10. ✅ **Enhanced Community Summaries** (NEW - multi-level hierarchy)
 11. ✅ **Adaptive Type Discovery** (NEW - schema induction)
@@ -53,7 +56,7 @@ python -m knowledge_base.clients.cli ingest /path/to/document.md
 - **Vector embeddings** for semantic search
 - **BM25 keyword search** for hybrid retrieval
 - **Cross-encoder reranking** for improved results
-- **Deduplicated** entities
+- **Deduplicated** entities (Global ER across all documents)
 - **Multi-level community clusters** (macro → meso → micro → nano)
 - **Adaptive type discovery** with schema induction
 - **Intelligence reports** with insights

@@ -95,13 +95,18 @@ class VectorStore:
             f"@{self._config.host}:{self._config.port}/{self._config.name}"
         )
 
-        self._pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
-
-        async with self._pool.acquire() as conn:
-            # Register vector type first, before any other operations
+        async def init_connection(conn):
             await register_vector(conn)
 
-            # Then create extension and check columns
+        self._pool = await asyncpg.create_pool(
+            dsn, 
+            min_size=2, 
+            max_size=10,
+            init=init_connection
+        )
+
+        async with self._pool.acquire() as conn:
+            # Create extension and check columns
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
             # Check if embedding column exists and has correct type
@@ -177,8 +182,6 @@ class VectorStore:
             else query_embedding
         )
         async with self._pool.acquire() as conn:
-            # Convert embedding to string format for pgvector
-            embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
             rows = await conn.fetch(
                 """
                 SELECT
@@ -188,14 +191,14 @@ class VectorStore:
                     description,
                     properties,
                     confidence,
-                    1 - (embedding <=> $1::vector) as similarity
+                    1 - (embedding <=> $1) as similarity
                 FROM entities
                 WHERE embedding IS NOT NULL
-                AND 1 - (embedding <=> $1::vector) >= $2
-                ORDER BY embedding <=> $1::vector
+                AND 1 - (embedding <=> $1) >= $2
+                ORDER BY embedding <=> $1
                 LIMIT $3
                 """,
-                embedding_str,
+                query_embedding,
                 similarity_threshold,
                 limit,
             )
@@ -225,8 +228,6 @@ class VectorStore:
             else query_embedding
         )
         async with self._pool.acquire() as conn:
-            # Convert embedding to string format for pgvector
-            embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
             rows = await conn.fetch(
                 """
                 SELECT
@@ -236,15 +237,15 @@ class VectorStore:
                     c.chunk_index,
                     c.page_number,
                     d.name as document_name,
-                    1 - (c.embedding <=> $1::vector) as similarity
+                    1 - (c.embedding <=> $1) as similarity
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
                 WHERE c.embedding IS NOT NULL
-                AND 1 - (c.embedding <=> $1::vector) >= $2
-                ORDER BY c.embedding <=> $1::vector
+                AND 1 - (c.embedding <=> $1) >= $2
+                ORDER BY c.embedding <=> $1
                 LIMIT $3
                 """,
-                embedding_str,
+                query_embedding,
                 similarity_threshold,
                 limit,
             )

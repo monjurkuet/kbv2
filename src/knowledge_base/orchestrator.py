@@ -770,11 +770,26 @@ class IngestionOrchestrator:
                         similarity_threshold=0.85,
                     )
 
-                    candidates = [
-                        e
-                        for e in entities
-                        if e.id != entity.id and str(e.id) in [s["id"] for s in similar]
-                    ]
+                    # Extract candidate IDs from similarity results
+                    candidate_ids = []
+                    for s in similar:
+                        # Force string conversion before calling UUID constructor
+                        # to avoid issues with raw asyncpg UUID objects
+                        s_id_str = str(s["id"])
+                        if s_id_str != str(entity.id):
+                            try:
+                                candidate_ids.append(UUID(s_id_str))
+                            except (ValueError, TypeError):
+                                continue
+
+                    if candidate_ids:
+                        # Fetch the actual entity objects for global resolution
+                        candidate_result = await session.execute(
+                            select(Entity).where(Entity.id.in_(candidate_ids))
+                        )
+                        candidates = candidate_result.scalars().all()
+                    else:
+                        candidates = []
 
                     if candidates:
                         chunk_text = ""
@@ -1085,7 +1100,9 @@ class IngestionOrchestrator:
             resolution: Entity resolution result.
         """
         async with self._vector_store.get_session() as session:
+            target_id = resolution.entity_id
             for merged_id in resolution.merged_entity_ids:
+                # 1. Update edges to point to the unified entity
                 edges = await session.execute(
                     select(Edge).where(
                         (Edge.source_id == merged_id) | (Edge.target_id == merged_id)
@@ -1094,13 +1111,127 @@ class IngestionOrchestrator:
 
                 for edge in edges.scalars().all():
                     if edge.source_id == merged_id:
-                        edge.source_id = resolution.entity_id
+                        edge.source_id = target_id
                     else:
-                        edge.target_id = resolution.entity_id
+                        edge.target_id = target_id
 
-                await session.delete(await session.get(Entity, merged_id))
+                # 2. Update Chunk-Entity links to point to the unified entity
+                # We need to handle potential duplicates (chunk already linked to target)
+                chunk_links_result = await session.execute(
+                    select(ChunkEntity).where(ChunkEntity.entity_id == merged_id)
+                )
+                chunk_links = chunk_links_result.scalars().all()
+
+                for link in chunk_links:
+                    # Check if target entity already has a link to this chunk
+                    existing_link_result = await session.execute(
+                        select(ChunkEntity).where(
+                            ChunkEntity.chunk_id == link.chunk_id,
+                            ChunkEntity.entity_id == target_id
+                        )
+                    )
+                    if existing_link_result.scalar_one_or_none():
+                        await session.delete(link)
+                    else:
+                        link.entity_id = target_id
+
+                # 3. Delete the redundant entity
+                merged_entity = await session.get(Entity, merged_id)
+                if merged_entity:
+                    await session.delete(merged_entity)
 
             await session.commit()
+
+    async def global_deduplicate_entities(self) -> dict[str, Any]:
+        """Perform a global entity resolution sweep across the entire knowledge base."""
+        async with self._vector_store.get_session() as session:
+            # 1. Fetch all entities
+            result = await session.execute(select(Entity))
+            all_entities = result.scalars().all()
+            total = len(all_entities)
+            merged_count = 0
+            review_count = 0
+
+            logger.info(f"Starting global deduplication for {total} entities")
+
+            for i, entity in enumerate(all_entities):
+                if i % 10 == 0:
+                    logger.info(f"Deduplication progress: {i}/{total} candidates processed...")
+
+                # Similar logic to _resolve_entities but targeting the whole DB
+                embedding = entity.embedding
+                if embedding is None:
+                    continue
+
+                # Ensure entity still exists (might have been merged away in this loop)
+                current_entity = await session.get(Entity, entity.id)
+                if not current_entity:
+                    continue
+
+                similar = await self._vector_store.search_similar_entities(
+                    embedding.tolist() if hasattr(embedding, "tolist") else embedding,
+                    limit=5,
+                    similarity_threshold=0.85,
+                )
+
+                candidate_ids = []
+                for s in similar:
+                    # Force string conversion before calling UUID constructor
+                    # to avoid issues with raw asyncpg UUID objects
+                    s_id_str = str(s["id"])
+                    if s_id_str != str(entity.id):
+                        try:
+                            candidate_ids.append(UUID(s_id_str))
+                        except (ValueError, TypeError):
+                            continue
+
+                if not candidate_ids:
+                    continue
+
+                candidate_result = await session.execute(
+                    select(Entity).where(Entity.id.in_(candidate_ids))
+                )
+                candidates = candidate_result.scalars().all()
+
+                if candidates:
+                    # Get any chunk context for grounding
+                    chunk_result = await session.execute(
+                        select(Chunk)
+                        .join(ChunkEntity, ChunkEntity.chunk_id == Chunk.id)
+                        .where(ChunkEntity.entity_id == entity.id)
+                        .limit(1)
+                    )
+                    chunk = chunk_result.scalar_one_or_none()
+                    chunk_text = (
+                        chunk.text
+                        if chunk
+                        else "Global cleanup sweep - no specific chunk context available for this entity."
+                    )
+
+                    resolution = await self._resolution_agent.resolve_entity(
+                        entity, candidates, chunk_text
+                    )
+
+                    if resolution.merged_entity_ids:
+                        if resolution.human_review_required:
+                            await self._add_to_review_queue(
+                                None,
+                                entity.id,
+                                resolution.merged_entity_ids,
+                                resolution.confidence_score,
+                                resolution.grounding_quote,
+                                chunk_text,
+                            )
+                            review_count += 1
+                        else:
+                            await self._merge_entities(resolution)
+                            merged_count += len(resolution.merged_entity_ids)
+
+            return {
+                "total_processed": total,
+                "merged_entities": merged_count,
+                "pending_review": review_count,
+            }
 
     async def _add_to_review_queue(
         self,

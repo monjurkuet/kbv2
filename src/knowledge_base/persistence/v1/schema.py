@@ -428,10 +428,9 @@ class ChunkEntity(Base):
 class EntityResolution(BaseModel):
     """Entity resolution result."""
 
-    source_id: str
-    target_id: str
-    confidence: float
-    merged_entity_ids: Optional[list[str]] = None
+    entity_id: UUID
+    confidence_score: float
+    merged_entity_ids: list[UUID] = Field(default_factory=list)
     human_review_required: bool = False
     grounding_quote: Optional[str] = None
 

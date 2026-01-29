@@ -240,14 +240,14 @@ Provide your analysis in JSON format."""
             grounding_quote = f"[Quote not found in source] {grounding_quote}"
 
         try:
-            target_uuid = UUID(target_id) if target_id else entity_id
+            target_uuid = UUID(str(target_id)) if target_id else entity_id
         except (ValueError, TypeError):
             target_uuid = entity_id
 
         merged_uuids = []
         for mid in merged_ids:
             try:
-                merged_uuids.append(UUID(mid))
+                merged_uuids.append(UUID(str(mid)))
             except (ValueError, TypeError):
                 pass
 

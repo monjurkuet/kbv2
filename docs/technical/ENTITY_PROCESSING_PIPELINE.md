@@ -262,11 +262,11 @@ for entity in entities:
 
 ---
 
-## Stage 6: Entity Resolution
+## Stage 6: Global Entity Resolution
 
-**Location**: `src/knowledge_base/intelligence/v1/resolution_agent.py`
+**Location**: `src/knowledge_base/intelligence/v1/resolution_agent.py` and `src/knowledge_base/orchestrator.py`
 
-**Purpose**: Merge duplicate entities (e.g., "Dr. Chen", "Sarah Chen", "Dr. Sarah Chen")
+**Purpose**: Merge duplicate entities globally across all documents in the database (e.g., "Dr. Chen", "Sarah Chen", "Dr. Sarah Chen")
 
 ### 6a: Candidate Search
 
@@ -280,12 +280,15 @@ for entity in entities:
         similarity_threshold=0.85
     )
 
+    # Selection is GLOBAL - we search all entities in the database
     candidates = [
-        e for e in entities
+        e for e in all_database_entities
         if e.id != entity.id
         and str(e.id) in [s["id"] for s in similar]
     ]
 ```
+
+**Global vs Local**: Historically, ER was document-local. The system now searches the entire vector store for candidates, enabling cross-document knowledge unification.
 
 **Similarity Threshold**: 0.85 (85% similarity)
 
@@ -334,9 +337,17 @@ if resolution.merged_entity_ids:
 ```
 
 **Merge Operations**:
-1. Update all edges to point to target entity
-2. Delete merged entities
-3. Preserve confidence scores (max)
+1. Update all `Edge` records (source/target) to point to the survivor entity.
+2. Update all `ChunkEntity` links to point to the survivor entity (preserving evidence).
+3. Handle potential duplicate `ChunkEntity` links (avoiding constraint violations).
+4. Delete merged entities from the database.
+5. Preserve confidence scores (max).
+
+**Knowledge Health CLI**:
+A dedicated command is available to perform a global deduplication sweep:
+```bash
+uv run python -m knowledge_base.clients.cli dedupe
+```
 
 **Resolution Model**:
 ```python

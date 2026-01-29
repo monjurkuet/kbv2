@@ -11,7 +11,7 @@ The KBV2 ingestion pipeline now uses **all available features** for maximum inte
 5. **Guided Extraction** - Fully automated, domain-specific (NEW)
 6. **Multi-Agent Entity Extraction** - Advanced AI extraction with quality scoring
 7. **Embedding Generation** - Vector embeddings with batching
-8. **Entity Resolution** - Deduplicates similar entities
+8. **Global Entity Resolution** - Deduplicates similar entities across the entire database (NEW)
 9. **Entity Clustering** - Groups entities into communities
 10. **Enhanced Community Summaries** - Multi-level hierarchy (NEW)
 11. **Adaptive Type Discovery** - Schema induction from data (NEW)
@@ -42,6 +42,16 @@ python -m knowledge_base.clients.cli ingest \
   --host localhost \
   --port 8765 \
   --timeout 900
+
+### Knowledge Base Maintenance (Deduplication)
+
+```bash
+# Perform a global entity resolution sweep across the entire KB
+uv run python -m knowledge_base.clients.cli dedupe
+
+# Use specific host/port if necessary
+uv run python -m knowledge_base.clients.cli --host localhost --port 8765 dedupe
+```
 ```
 
 ### Examples by Domain
@@ -250,11 +260,12 @@ asyncio.run(batch_ingest())
 - Batching for performance optimization
 - Embeds chunks and entities
 
-### Stage 8: Entity Resolution
-- Detects duplicate entities
+### Stage 8: Global Entity Resolution (NEW)
+- Detects duplicate entities across ALL documents in the database
 - Merges similar entities with confidence scoring
-- Updates relationships
-- Uses verbatim grounding quotes
+- Safely re-links `ChunkEntity` and `Edge` records to the unified target
+- Uses verbatim grounding quotes for all merge decisions
+- Re-attributes all supporting evidence to the survivor entity
 
 ### Stage 9: Entity Clustering
 - Groups entities into communities

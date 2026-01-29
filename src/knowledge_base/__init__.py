@@ -23,7 +23,7 @@ def main() -> None:
     # Run the FastAPI app with reload for development convenience.
     uvicorn.run(
         "knowledge_base.main:app",
-        host="0.0.0.0",
+        host="localhost",
         port=8765,
         reload=True,
     )

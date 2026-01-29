@@ -5,7 +5,8 @@ A high-fidelity information extraction engine that transforms unstructured data 
 ## Key Features
 
 - **High-Resolution Adaptive Gleaning**: 2-pass density-aware extraction strategy
-- **Verbatim-Grounded Entity Resolution**: Hybrid matching with mandatory grounding quotes
+- **Grounded Global Entity Resolution**: Dedupes similar entities across the entire database with mandatory citations
+- **CLI-Based Knowledge Sanitization**: New `dedupe` command for global entity resolution sweeps
 - **Hierarchical Leiden Clustering**: Macro and Micro community detection
 - **Map-Reduce Recursive Summarization**: Intelligence reports with edge fidelity
 - **Temporal Information Extraction (IE)**: ISO-8601 normalized temporal claims
@@ -35,6 +36,9 @@ cp .env.example .env
 
 # Run the system
 uv run knowledge-base
+
+# Run global deduplication sweep
+uv run python -m knowledge_base.clients.cli dedupe
 ```
 
 ## Note on Frontend

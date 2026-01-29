@@ -384,6 +384,19 @@ class KBV2WebSocketClient:
         params = {"document_id": document_id}
         return await self.send_request("kbv2/get_document_status", params, request_id)
 
+    async def deduplicate_entities(
+        self, request_id: Optional[str] = None
+    ) -> MCPResponse:
+        """Trigger global entity deduplication.
+
+        Args:
+            request_id: Optional request ID
+
+        Returns:
+            MCPResponse with deduplication result
+        """
+        return await self.send_request("kbv2/deduplicate_entities", {}, request_id)
+
     async def __aenter__(self):
         """Async context manager entry."""
         await self.connect()
