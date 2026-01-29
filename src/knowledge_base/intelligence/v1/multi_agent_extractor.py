@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.intelligence.v1.extraction_logging import (
+    get_ingestion_logger,
+)
 from knowledge_base.persistence.v1.graph_store import GraphStore
 from knowledge_base.persistence.v1.schema import (
     Chunk,
@@ -719,21 +722,55 @@ class ManagerAgent:
         Returns:
             Final workflow state with all extraction results.
         """
+        # Initialize logger
+        logger = get_ingestion_logger(document_id, f"doc_{document_id}")
+        logger.log_stage_start("Multi-Agent Extraction Workflow", total_steps=3)
+
         state = ExtractionWorkflowState(document_id=document_id)
 
         try:
+            # Phase 1: Perception
+            logger.log_stage_progress("Multi-Agent Extraction Workflow", 1, 3)
             state = await self._run_perception_phase(state, chunks, entity_types)
 
             if not state.perception_entities:
+                logger.log_error("No entities extracted in perception phase")
+                logger.log_summary()
                 return state
 
+            logger.log_stage_complete(
+                "Perception Phase",
+                f"Extracted {len(state.perception_entities)} entities"
+            )
+
+            # Phase 2: Enhancement
+            logger.log_stage_progress("Multi-Agent Extraction Workflow", 2, 3)
             state = await self._run_enhancement_phase(state)
 
+            logger.log_stage_complete(
+                "Enhancement Phase",
+                f"Enhanced {len(state.enhanced_entities)} entities"
+            )
+
+            # Phase 3: Evaluation
+            logger.log_stage_progress("Multi-Agent Extraction Workflow", 3, 3)
             state = await self._run_evaluation_phase(state, chunks)
 
+            logger.log_stage_complete(
+                "Evaluation Phase",
+                f"Quality score: {getattr(state, 'quality_score', 'N/A')}"
+            )
+
+            logger.log_stage_complete(
+                "Multi-Agent Extraction Workflow",
+                f"Total entities: {len(getattr(state, 'enhanced_entities', []))}"
+            )
+
         except Exception as e:
+            logger.log_error(str(e))
             state.errors.append(str(e))
 
+        logger.log_summary()
         return state
 
     async def _run_perception_phase(

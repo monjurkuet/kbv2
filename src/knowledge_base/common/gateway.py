@@ -146,7 +146,42 @@ class GatewayClient:
         )
         response.raise_for_status()
 
-        return ChatCompletionResponse.model_validate(response.json())
+        # Parse response JSON
+        response_data = response.json()
+
+        # Check if response contains error data (some gateways return errors as 200)
+        if isinstance(response_data, dict) and (
+            "status" in response_data or "error" in response_data or "msg" in response_data
+        ):
+            # Extract status code from error response
+            status_code = 500
+            if "status" in response_data:
+                # Handle both string and int status
+                status = response_data["status"]
+                if isinstance(status, str) and status.isdigit():
+                    status_code = int(status)
+                elif isinstance(status, int):
+                    status_code = status
+            elif "error" in response_data and isinstance(response_data["error"], dict):
+                error_data = response_data["error"]
+                if "code" in error_data:
+                    status_code = error_data.get("code", 500)
+
+            error_msg = response_data.get("msg", response_data.get("error", "Unknown error"))
+            logger.warning(f"Model {request.model} returned error: {error_msg} (status: {status_code})")
+
+            # Raise as HTTP error so it can be handled by retry/rotation logic
+            raise httpx.HTTPStatusError(
+                f"Model error: {error_msg}",
+                request=response.request,
+                response=httpx.Response(
+                    status_code=status_code,
+                    content=str(error_msg).encode(),
+                    request=response.request,
+                ),
+            )
+
+        return ChatCompletionResponse.model_validate(response_data)
 
     async def generate_text(
         self,

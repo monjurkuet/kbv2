@@ -11,6 +11,7 @@ from knowledge_base.extraction.template_registry import (
     ExtractionGoal,
     TemplateRegistry,
 )
+from knowledge_base.persistence.v1.schema import EdgeType
 
 logger = logging.getLogger(__name__)
 
@@ -638,7 +639,6 @@ IMPORTANT: Respond with valid JSON only."""
             ExtractedEntity,
             ExtractedEdge,
         )
-        from knowledge_base.persistence.v1.schema import EdgeType
 
         import re
 

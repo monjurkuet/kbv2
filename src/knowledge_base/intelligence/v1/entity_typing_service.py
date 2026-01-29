@@ -1,5 +1,6 @@
 """Entity typing service with few-shot prompting and domain awareness."""
 
+import logging
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -8,6 +9,12 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.common.llm_logging_wrapper import (
+    LLMCallLogger,
+    log_llm_result,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class EntityType(str, Enum):
@@ -449,11 +456,34 @@ class EntityTyper:
             examples=examples,
         )
 
-        response = await self._gateway.generate_text(
-            prompt=user_prompt,
-            system_prompt=template.system_prompt,
-            temperature=self._config.temperature,
-            json_mode=True,
+        # Log entity typing call
+        logger.info(
+            f"🎯 ENTITY TYPING: {entity.name[:50]}...\n"
+            f"   📄 Description: {entity.description[:100] if entity.description else 'N/A'}\n"
+            f"   📝 Types to consider: {list(set(e.entity_type.value for e in examples))[:5]}"
+        )
+
+        async with LLMCallLogger(
+            agent_name="EntityTyper",
+            document_id=str(entity.entity_id),
+            step_info=f"Type determination",
+        ):
+            response = await self._gateway.generate_text(
+                prompt=user_prompt,
+                system_prompt=template.system_prompt,
+                temperature=self._config.temperature,
+                json_mode=True,
+            )
+
+        log_llm_result(
+            "EntityTyper",
+            response,
+            str(entity.entity_id),
+            metadata={
+                "entity_name": entity.name,
+                "domain": domain.value,
+                "examples_count": len(examples),
+            },
         )
 
         result = self._parse_typing_response(response, entity)

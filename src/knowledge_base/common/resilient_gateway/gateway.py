@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -222,6 +223,10 @@ class ResilientGatewayConfig(GatewayConfig):
     model_switching_enabled: bool = True
     fallback_models: List[str] = []
 
+    # Continuous rotation settings
+    continuous_rotation_enabled: bool = True  # If True, loop through models until success
+    rotation_delay: float = 5.0  # Delay in seconds between full rotation cycles
+
     # Metrics settings
     enable_metrics: bool = True
 
@@ -334,6 +339,10 @@ class ResilientGatewayClient:
         self._active_models: Set[str] = set()
         self._current_model_index = 0
 
+        # List of available models for random selection
+        self._available_models_list: List[str] = []
+        self._random_model_selection = True  # Enable random model selection by default
+
     def _initialize_circuit_breakers(self):
         """Initialize circuit breakers for configured models."""
         all_models = [self._config.model] + self._config.fallback_models
@@ -343,6 +352,36 @@ class ResilientGatewayClient:
                 recovery_timeout=self._config.circuit_breaker_recovery_timeout,
                 success_threshold=self._config.circuit_breaker_success_threshold,
             )
+
+    async def _initialize_available_models(self):
+        """Initialize list of available models for random selection."""
+        if not self._available_models_list:
+            models = await self._get_available_models()
+            if models:
+                self._available_models_list = models
+                logger.info(f"Initialized {len(models)} models for random selection: {models}")
+
+    def _select_random_model(self) -> str:
+        """Select a random model from available models."""
+        if not self._available_models_list:
+            # Fallback to configured model if list not initialized
+            return self._config.model
+
+        # Filter out models with open circuit breakers
+        available = [
+            model for model in self._available_models_list
+            if self._circuit_breakers.get(model, CircuitBreaker()).can_execute()
+        ]
+
+        if not available:
+            # If all circuits are open, return default model (circuit breaker will handle it)
+            logger.warning("All model circuits are open, falling back to default model")
+            return self._config.model
+
+        # Select random model
+        selected = random.choice(available)
+        logger.debug(f"Randomly selected model: {selected} from {len(available)} available models")
+        return selected
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get current gateway metrics."""
@@ -409,6 +448,15 @@ class ResilientGatewayClient:
         status_code = 500
         last_error = None
 
+        # If continuous rotation is enabled, don't retry same model (rotate instead)
+        if getattr(self._config, 'continuous_rotation_enabled', True):
+            # Try once without retry
+            response, status_code = await self._try_model(request)
+            if response is not None:
+                return response, 200
+            return None, status_code
+
+        # Original retry logic for single-pass mode
         for attempt in range(self._config.retry_max_attempts + 1):
             if attempt > 0:
                 if self._metrics:
@@ -471,7 +519,7 @@ class ResilientGatewayClient:
 
         Args:
             messages: List of chat messages.
-            model: Model name. If None, uses config default.
+            model: Model name. If None, uses config default or random selection.
             temperature: Sampling temperature. If None, uses config default.
             max_tokens: Maximum tokens to generate. If None, uses config default.
             response_format: Response format specification.
@@ -482,15 +530,26 @@ class ResilientGatewayClient:
         Raises:
             httpx.HTTPError: If all retry attempts and model switches fail.
         """
+        # Initialize available models list if needed
+        if self._random_model_selection and not self._available_models_list:
+            await self._initialize_available_models()
+
         # Normalize messages
         normalized_messages = [
             ChatMessage.model_validate(msg) if isinstance(msg, dict) else msg
             for msg in messages
         ]
 
+        # Select model - use random selection if enabled and no specific model requested
+        selected_model = model
+        if not selected_model and self._random_model_selection:
+            selected_model = self._select_random_model()
+        elif not selected_model:
+            selected_model = self._config.model
+
         # Prepare request
         request = ChatCompletionRequest(
-            model=model or self._config.model,
+            model=selected_model,
             messages=normalized_messages,
             temperature=temperature or self._config.temperature,
             max_tokens=max_tokens or self._config.max_tokens,
@@ -507,59 +566,124 @@ class ResilientGatewayClient:
         final_response = response
         final_status_code = status_code
 
-        # If rate limited and model switching is enabled, try other models
-        if status_code == 429 and self._config.model_switching_enabled:
+        # If we got an error and model switching is enabled, handle model rotation
+        if final_response is None and self._config.model_switching_enabled:
             available_models = await self._get_available_models()
-            logger.info(
-                f"Rate limited on {original_model}, trying {len(available_models)} other models"
-            )
+            # Skip the original model since we already tried it
+            other_models = [m for m in available_models if m != original_model]
 
-            for other_model in available_models:
-                if other_model == original_model:
-                    continue
+            # Check if continuous rotation is enabled (default: True)
+            if getattr(self._config, 'continuous_rotation_enabled', True):
+                # Continuous rotation mode: keep looping through models until success
+                cycle_count = 0
 
-                # Create a new request with the different model to avoid modifying original
-                switched_request = ChatCompletionRequest(
-                    model=other_model,
-                    messages=request.messages,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    response_format=request.response_format,
-                )
+                # Keep looping through models until we get a successful response
+                while final_response is None:
+                    cycle_count += 1
+                    logger.info(f"Model rotation cycle {cycle_count} (status: {status_code}), trying {len(other_models)} models")
 
-                # Try with new model
-                response, status_code = await self._execute_with_retry(switched_request)
+                    # Try each available model (skipping the original)
+                    for model in other_models:
+                        # Skip if this model just failed (unless it's been a while)
+                        circuit_breaker = await self._get_circuit_breaker(model)
+                        if not circuit_breaker.can_execute():
+                            logger.debug(f"Skipping {model} - circuit breaker open")
+                            continue
 
-                if response is not None:
-                    logger.info(
-                        f"Successfully completed request using model {other_model} after rate limit on {original_model}"
+                        # Record model switch
+                        if self._metrics:
+                            self._metrics.record_model_switch()
+
+                        # Create request for this model
+                        model_request = ChatCompletionRequest(
+                            model=model,
+                            messages=request.messages,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            response_format=request.response_format,
+                        )
+
+                        # Try the model (without retry when continuous rotation is enabled)
+                        response, status_code = await self._execute_with_retry(model_request)
+
+                        if response is not None:
+                            logger.info(f"Success with model {model} after {cycle_count} cycles")
+                            final_response = response
+                            final_status_code = 200
+                            break
+
+                        # Small delay between model attempts to avoid hammering
+                        await asyncio.sleep(0.1)
+
+                    # If all models failed, wait before next cycle (regardless of error type)
+                    if final_response is None:
+                        logger.info(f"All models failed in cycle {cycle_count} (last status: {status_code}), waiting {self._config.rotation_delay}s")
+                        await asyncio.sleep(self._config.rotation_delay)
+            else:
+                # Single-pass mode: try each model once (original behavior)
+                logger.info(f"Rate limited on {original_model}, trying {len(other_models)} other models")
+
+                for other_model in other_models:
+                    # Check circuit breaker before trying
+                    circuit_breaker = await self._get_circuit_breaker(other_model)
+                    if not circuit_breaker.can_execute():
+                        logger.debug(f"Skipping {other_model} - circuit breaker open")
+                        continue
+
+                    # Create a new request with the different model
+                    switched_request = ChatCompletionRequest(
+                        model=other_model,
+                        messages=request.messages,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                        response_format=request.response_format,
                     )
-                    final_response = response
-                    final_status_code = 200
-                    break
 
-                # If response was received (not rate limited), break
-                if status_code != 429:
-                    final_response = response
-                    final_status_code = status_code
-                    break
+                    # Try with new model (with retry logic)
+                    response, status_code = await self._execute_with_retry(switched_request)
 
-        # If all models failed and we're still getting rate limits, try fallback models
-        if final_status_code == 429 and self._config.model_switching_enabled:
-            for fallback_model in self._config.fallback_models:
-                if fallback_model == original_model:
-                    continue
+                    if response is not None:
+                        logger.info(f"Successfully completed request using model {other_model}")
+                        final_response = response
+                        final_status_code = 200
+                        break
 
-                request.model = fallback_model
-                response, status_code = await self._execute_with_retry(request)
+                    # If response was received (any success), break
+                    if response is not None:
+                        final_response = response
+                        final_status_code = 200
+                        break
 
-                if response is not None:
-                    logger.info(
-                        f"Successfully completed request using fallback model {fallback_model}"
-                    )
-                    final_response = response
-                    final_status_code = 200
-                    break
+                # If all models failed, try fallback models as a last resort
+                if final_response is None:
+                    for fallback_model in self._config.fallback_models:
+                        if fallback_model == original_model:
+                            continue
+
+                        # Check circuit breaker for fallback model
+                        fb_circuit_breaker = await self._get_circuit_breaker(fallback_model)
+                        if not fb_circuit_breaker.can_execute():
+                            logger.debug(f"Skipping fallback {fallback_model} - circuit breaker open")
+                            continue
+
+                        # Record model switch
+                        if self._metrics:
+                            self._metrics.record_model_switch()
+
+                        fb_request = ChatCompletionRequest(
+                            model=fallback_model,
+                            messages=request.messages,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            response_format=request.response_format,
+                        )
+                        response, status_code = await self._execute_with_retry(fb_request)
+
+                        if response is not None:
+                            logger.info(f"Successfully completed request using fallback model {fallback_model}")
+                            final_response = response
+                            final_status_code = 200
+                            break
 
         # Record the final result for metrics
         if self._metrics:

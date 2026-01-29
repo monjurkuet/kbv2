@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -18,6 +18,10 @@ from knowledge_base.intelligence.v1.multi_agent_extractor import (
     EntityExtractionManager,
     ExtractionQualityScore,
     ExtractedEntity,
+)
+from knowledge_base.intelligence.v1.adaptive_ingestion_engine import (
+    AdaptiveIngestionEngine,
+    PipelineRecommendation,
 )
 from knowledge_base.intelligence.v1.hallucination_detector import (
     HallucinationDetector,
@@ -57,6 +61,7 @@ from knowledge_base.persistence.v1.schema import (
     Community,
     Document,
     Edge,
+    EdgeType,
     Entity,
     ChunkEntity,
     ReviewQueue,
@@ -208,13 +213,20 @@ class IngestionOrchestrator:
     def __init__(
         self,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        log_broadcast: Optional[Callable[[str], Any]] = None,
     ) -> None:
         """Initialize the orchestrator.
 
         Args:
             progress_callback: Optional callback for progress updates.
+            log_broadcast: Optional callback for broadcasting log messages via WebSocket.
         """
         self._progress_callback = progress_callback
+        self._log_broadcast = log_broadcast
+        # Set up the global WebSocket broadcast function for extraction logging
+        if log_broadcast:
+            from knowledge_base.intelligence.v1.extraction_logging import set_websocket_broadcast
+            set_websocket_broadcast(log_broadcast)
         self._observability: Observability | None = None
         self._gateway: GatewayClient | None = None
         self._vector_store: VectorStore | None = None
@@ -229,11 +241,18 @@ class IngestionOrchestrator:
         self._entity_typer: EntityTyper | None = None
         self._schema_registry: SchemaRegistry | None = None
         self._domain_detector: DomainDetector | None = None
+        self._adaptive_engine: AdaptiveIngestionEngine | None = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
         self._observability = Observability()
-        self._gateway = ResilientGatewayClient()
+        # Initialize gateway with continuous rotation enabled for robust model failover
+        from knowledge_base.common.resilient_gateway import ResilientGatewayConfig
+        gateway_config = ResilientGatewayConfig(
+            continuous_rotation_enabled=True,  # Enable continuous model rotation
+            rotation_delay=5.0,  # 5 second delay between rotation cycles
+        )
+        self._gateway = ResilientGatewayClient(config=gateway_config)
         self._embedding_client = EmbeddingClient()
         self._vector_store = VectorStore()
         # GraphStore is created lazily in methods that have a session
@@ -268,6 +287,10 @@ class IngestionOrchestrator:
                 keyword_threshold=0.3,
             ),
         )
+
+        # Initialize adaptive ingestion engine for intelligent pipeline optimization
+        self._adaptive_engine = AdaptiveIngestionEngine(gateway=self._gateway)
+
         logger.info("IngestionOrchestrator initialized successfully")
 
     async def _send_progress(self, progress_data: dict[str, Any]) -> None:
@@ -428,12 +451,14 @@ class IngestionOrchestrator:
         self,
         document: Document,
         use_multi_agent: bool = True,
+        recommendation: PipelineRecommendation | None = None,
     ) -> Document:
         """Extract entities, edges, and temporal claims.
 
         Args:
             document: Document record.
             use_multi_agent: If True, try multi-agent first, fallback to gleaning.
+            recommendation: Adaptive ingestion recommendation (optional).
 
         Returns:
             Updated document.
@@ -450,7 +475,16 @@ class IngestionOrchestrator:
                 multi_agent_success = False
                 quality_score = None
 
-                if use_multi_agent:
+                # Determine extraction approach based on recommendation
+                should_use_multi_agent = use_multi_agent
+                if recommendation and not recommendation.use_multi_agent:
+                    should_use_multi_agent = False
+                    logger.info(
+                        f"Adaptive analysis recommends gleaning approach: "
+                        f"{recommendation.justification}"
+                    )
+
+                if should_use_multi_agent:
                     try:
                         (
                             entities,
@@ -461,6 +495,7 @@ class IngestionOrchestrator:
                             document=document,
                             content_text="",
                             domain=self._determine_domain(document),
+                            recommendation=recommendation,
                         )
 
                         if quality_score and quality_score.overall_score >= 0.5:
@@ -1329,10 +1364,21 @@ class IngestionOrchestrator:
         document: Document,
         content_text: str,
         domain: str,
+        recommendation: PipelineRecommendation | None = None,
     ) -> Tuple[
         List[Entity], List[Edge], ExtractionQualityScore, List[EntityVerification]
     ]:
-        """Extract entities using multi-agent system with quality verification."""
+        """Extract entities using multi-agent system with quality verification.
+
+        Args:
+            document: Document record.
+            content_text: Document content text.
+            domain: Document domain.
+            recommendation: Adaptive ingestion recommendation for optimization.
+
+        Returns:
+            Tuple of (entities, edges, quality_score, verifications).
+        """
         from knowledge_base.persistence.v1.graph_store import GraphStore
 
         try:
@@ -1358,10 +1404,24 @@ class IngestionOrchestrator:
                     )
 
                 graph_store = GraphStore(session)
+
+                # Create extraction manager with config overrides if recommendation provided
+                config_kwargs = {}
+                if recommendation:
+                    config_kwargs = {
+                        "enhancement_max_iterations": recommendation.max_enhancement_iterations,
+                        "confidence_threshold": recommendation.confidence_threshold,
+                    }
+                    logger.info(
+                        f"Using adaptive config: max_iterations={recommendation.max_enhancement_iterations}, "
+                        f"confidence_threshold={recommendation.confidence_threshold}"
+                    )
+
                 extraction_manager = EntityExtractionManager(
                     gateway=self._gateway,
                     graph_store=graph_store,
                     vector_store=self._vector_store,
+                    **config_kwargs,
                 )
 
                 (
@@ -1540,10 +1600,36 @@ class IngestionOrchestrator:
                     2, "completed", "Document partitioned into chunks"
                 )
 
+                # Adaptive analysis: Let LLM decide optimal processing strategy
+                await self._emit_progress(2.5, "started", "Analyzing document complexity")
+
+                # Combine first few chunks for analysis (avoid token limits)
+                async with self._vector_store.get_session() as session:
+                    chunk_result = await session.execute(
+                        select(Chunk).where(Chunk.document_id == document.id).limit(3)
+                    )
+                    sample_chunks = chunk_result.scalars().all()
+
+                    sample_text = " ".join([chunk.text for chunk in sample_chunks])
+
+                    # Get adaptive recommendation
+                    recommendation = await self._adaptive_engine.analyze_document(
+                        document_text=sample_text,
+                        document_name=document.name,
+                        file_size_bytes=sum([len(chunk.text) for chunk in sample_chunks])
+                    )
+
+                await self._emit_progress(
+                    2.5, "completed",
+                    f"Analysis complete: {recommendation.complexity.value}, "
+                    f"{recommendation.expected_entity_count} entities expected, "
+                    f"{recommendation.estimated_processing_time} processing time"
+                )
+
                 await self._emit_progress(
                     3, "started", "Extracting knowledge (entities and edges)"
                 )
-                document = await self._extract_knowledge(document)
+                document = await self._extract_knowledge(document, recommendation)
                 await self._emit_progress(
                     3, "completed", "Knowledge extraction complete"
                 )

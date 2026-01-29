@@ -105,7 +105,8 @@ class KBV2MCPProtocol(MCPProtocol):
     def __init__(self):
         super().__init__()
         self.orchestrator = IngestionOrchestrator(
-            progress_callback=self._send_progress_update
+            progress_callback=self._send_progress_update,
+            log_broadcast=self.broadcast
         )
         self.text_to_sql_agent = None
         self.vector_store = VectorStore()

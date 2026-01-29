@@ -4,7 +4,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from tenacity import (
     retry,
@@ -23,52 +23,37 @@ class EmbeddingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
 
     embedding_url: str = "http://localhost:11434"
-    embedding_model: str = "nomic-embed-text"
-    dimensions: int = 2048  # Database dimension size (supports bge-m3=1024 and OpenAI up to 3072)
+    embedding_model: str = "bge-m3"  # Use bge-m3 for multilingual support
+    dimensions: int = 1024  # bge-m3 dimension size
+
+    @field_validator("embedding_url")
+    @classmethod
+    def strip_whitespace(cls, v: str) -> str:
+        """Strip whitespace including \r and \n from URL."""
+        return v.strip()
 
     @classmethod
     def for_model(
-        cls, model_name: str, url: str = "http://localhost:11434"
+        cls, model_name: str = "bge-m3", url: str = "http://localhost:11434"
     ) -> "EmbeddingConfig":
-        dimension_map = {
-            "nomic-embed-text": 768,
-            "nomic-embed-text-v1.5": 768,
-            "gte-large": 1024,
-            "e5-large-v2": 1024,
-            "bge-large-en-v1.5": 1024,
-            "bge-m3": 1024,  # Primary model - multilingual support
-            "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536,
-        }
+        """Create config for bge-m3 model with 1024 dimensions."""
+        # Always use bge-m3 with 1024 dimensions
+        if model_name != "bge-m3":
+            logger.warning(f"Model {model_name} not supported, using bge-m3")
+            model_name = "bge-m3"
+
         return cls(
             embedding_url=url,
             embedding_model=model_name,
-            # Use database dimension size (2048) not model dimension size
-            # The embedding will be truncated or padded as needed
-            dimensions=2048,
+            # Use 1024 dimensions for bge-m3 (matches database schema)
+            dimensions=1024,
         )
 
 
 EMBEDDING_CONFIGS: Dict[str, Dict[str, Any]] = {
-    "default": {"model": "nomic-embed-text", "dimensions": 768, "max_tokens": 8191},
-    "openai_small": {
-        "model": "text-embedding-3-small",
-        "dimensions": 1536,
-        "max_tokens": 8191,
-    },
-    "openai_large": {
-        "model": "text-embedding-3-large",
-        "dimensions": 3072,  # Will be truncated to 2048 in database
-        "max_tokens": 8191,
-    },
-    "high_dimension": {
-        "model": "text-embedding-3-large",
-        "dimensions": 3072,  # Will be truncated to 2048 in database
-        "max_tokens": 8191,
-    },
-    "bge_m3": {"model": "bge-m3", "dimensions": 1024, "max_tokens": 8191},  # Recommended for multilingual
-    "optimized": {"model": "nomic-embed-text", "dimensions": 512, "max_tokens": 8191},
+    # Only bge-m3 is supported - 1024 dimensions
+    "default": {"model": "bge-m3", "dimensions": 1024, "max_tokens": 8191},
+    "bge_m3": {"model": "bge-m3", "dimensions": 1024, "max_tokens": 8191},
 }
 
 
@@ -135,22 +120,28 @@ class EmbeddingClient:
         client = await self._get_client()
         request_body: Dict[str, Any] = {
             "model": self._config.embedding_model,
-            "prompt": text,
+            "input": text,  # Use 'input' not 'prompt' for /api/embed endpoint
         }
         if extra_params:
             request_body.update(extra_params)
 
         response = await client.post(
-            f"{self._config.embedding_url}/api/embeddings",
+            f"{self._config.embedding_url}/api/embed",  # Use /api/embed endpoint
             headers={"Content-Type": "application/json"},
             json=request_body,
         )
         response.raise_for_status()
         data = response.json()
 
-        embedding = data.get("embedding", [])
+        # Ollama /api/embed returns "embeddings" (plural) as an array
+        embeddings = data.get("embeddings", [])
+        if not embeddings or not isinstance(embeddings, list) or len(embeddings) == 0:
+            raise ValueError(f"No embeddings in response for text: {text[:50]}...")
+
+        # Get the first (and only) embedding from the array
+        embedding = embeddings[0]
         if not embedding:
-            raise ValueError(f"No embedding in response for text: {text[:50]}...")
+            raise ValueError(f"Empty embedding in response for text: {text[:50]}...")
 
         return [float(x) for x in embedding]
 
@@ -191,13 +182,16 @@ class EmbeddingClient:
 
         for text in texts:
             try:
-                embedding = await self._embed_with_retry(text)
-                
-                # Truncate or pad to database dimension size (2048)
-                if len(embedding) > self._dimensions:
-                    embedding = embedding[:self._dimensions]
-                elif len(embedding) < self._dimensions:
-                    embedding = embedding + [0.0] * (self._dimensions - len(embedding))
+                # Clean text to remove non-printable characters that cause URL errors
+                clean_text = text.replace('\r', '').replace('\n', ' ').strip()
+
+                embedding = await self._embed_with_retry(clean_text)
+
+                # bge-m3 produces exactly 1024 dimensions, no truncation/padding needed
+                if len(embedding) != self._dimensions:
+                    logger.warning(
+                        f"Embedding dimension mismatch: expected {self._dimensions}, got {len(embedding)}"
+                    )
                 
                 all_embeddings.append(embedding)
             except Exception as e:
@@ -212,101 +206,29 @@ class EmbeddingClient:
         dimensions: Optional[int] = None,
         batch_size: int = 100,
     ) -> List[List[float]]:
-        """Embed multiple texts with optional dimension truncation.
+        """Embed multiple texts using bge-m3.
 
         Processes a list of texts in batches and returns their embedding vectors.
-        Supports dimension truncation for optimized storage when full precision
-        is not required.
+        Always uses 1024 dimensions for bge-m3 model.
 
         Args:
             texts: List of texts to embed.
-            dimensions: Target embedding dimensions. If less than native
-                dimensions, embeddings will be truncated. If None, uses
-                the configured default dimensions.
+            dimensions: Kept for API compatibility, but always uses 1024.
             batch_size: Number of texts to process per API call.
 
         Returns:
-            List of embedding vectors, each as a list of floats.
+            List of embedding vectors (each 1024 dimensions).
         """
         if not texts:
             return []
 
-        target_dim = dimensions or self._dimensions
-
+        # Ignore dimensions parameter, always use bge-m3 with 1024 dims
         all_embeddings: List[List[float]] = []
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             batch_embeddings = await self.embed_batch(batch)
-
-            if target_dim < self._dimensions and batch_embeddings:
-                all_embeddings.extend(
-                    self._truncate_embeddings(batch_embeddings, target_dim)
-                )
-            else:
-                # Pad or truncate to exactly database dimension size (2048)
-                for emb in batch_embeddings:
-                    if len(emb) < self._dimensions:
-                        emb = emb + [0.0] * (self._dimensions - len(emb))
-                    elif len(emb) > self._dimensions:
-                        emb = emb[:self._dimensions]
-                    all_embeddings.append(emb)
-
-        return all_embeddings
-
-    def _truncate_embeddings(
-        self,
-        embeddings: List[List[float]],
-        target_dim: int,
-    ) -> List[List[float]]:
-        """Truncate embeddings to target dimensions.
-
-        Args:
-            embeddings: List of embedding vectors.
-            target_dim: Target number of dimensions.
-
-        Returns:
-            List of truncated embedding vectors.
-        """
-        truncated: List[List[float]] = []
-        for emb in embeddings:
-            if len(emb) > target_dim:
-                truncated.append(emb[:target_dim])
-            else:
-                truncated.append(emb)
-        return truncated
-
-    async def _embed_batch(
-        self,
-        texts: List[str],
-        extra_params: Optional[Dict[str, Any]] = None,
-    ) -> List[List[float]]:
-        """Embed a batch of texts with optional parameters.
-
-        Args:
-            texts: Texts to embed.
-            extra_params: Additional parameters for the API call.
-
-        Returns:
-            List of embedding vectors.
-        """
-        all_embeddings: List[List[float]] = []
-
-        for text in texts:
-            try:
-                embedding = await self._embed_with_retry(text, extra_params)
-                
-                # Ensure exact dimension size for database
-                if len(embedding) < self._dimensions:
-                    embedding = embedding + [0.0] * (self._dimensions - len(embedding))
-                elif len(embedding) > self._dimensions:
-                    embedding = embedding[:self._dimensions]
-                
-                all_embeddings.append(embedding)
-            except Exception as e:
-                logger.error(f"Failed to embed text after retries: {e}")
-                # Return zero vector of correct dimension
-                all_embeddings.append([0.0] * self._dimensions)
+            all_embeddings.extend(batch_embeddings)
 
         return all_embeddings
 

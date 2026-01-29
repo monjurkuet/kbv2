@@ -7,7 +7,7 @@ import numpy as np
 from pgvector.asyncpg import register_vector
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from knowledge_base.persistence.v1.schema import Base, Entity, Chunk
 
@@ -63,6 +63,7 @@ class VectorStore:
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
+        # Create engine
         self._engine = create_async_engine(
             self._config.url,
             pool_size=self._config.pool_size,
@@ -78,6 +79,8 @@ class VectorStore:
 
         await self._create_tables()
         await self._setup_pgvector()
+
+        print("Vector store initialized with pgvector support")
 
     async def _create_tables(self) -> None:
         """Create database tables."""
@@ -95,8 +98,10 @@ class VectorStore:
         self._pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
 
         async with self._pool.acquire() as conn:
+            # Register vector type first, before any other operations
             await register_vector(conn)
 
+            # Then create extension and check columns
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
             # Check if embedding column exists and has correct type
@@ -172,6 +177,8 @@ class VectorStore:
             else query_embedding
         )
         async with self._pool.acquire() as conn:
+            # Convert embedding to string format for pgvector
+            embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
             rows = await conn.fetch(
                 """
                 SELECT
@@ -188,7 +195,7 @@ class VectorStore:
                 ORDER BY embedding <=> $1::vector
                 LIMIT $3
                 """,
-                query_embedding,
+                embedding_str,
                 similarity_threshold,
                 limit,
             )
@@ -218,6 +225,8 @@ class VectorStore:
             else query_embedding
         )
         async with self._pool.acquire() as conn:
+            # Convert embedding to string format for pgvector
+            embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
             rows = await conn.fetch(
                 """
                 SELECT
@@ -235,7 +244,7 @@ class VectorStore:
                 ORDER BY c.embedding <=> $1::vector
                 LIMIT $3
                 """,
-                query_embedding,
+                embedding_str,
                 similarity_threshold,
                 limit,
             )
@@ -257,9 +266,10 @@ class VectorStore:
             result = await session.execute(select(Entity).where(Entity.id == entity_id))
             entity = result.scalar_one_or_none()
             if entity:
-                entity.embedding = (
-                    embedding.tolist() if hasattr(embedding, "tolist") else embedding
-                )
+                # Ensure embedding is a list of floats
+                if hasattr(embedding, "tolist"):
+                    embedding = embedding.tolist()
+                entity.embedding = embedding
                 await session.commit()
 
     async def update_chunk_embedding(
