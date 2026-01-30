@@ -111,4 +111,4 @@ build/test-results/
 # bun.lock
 
 gha-creds-*.json
-src/knowledge_base/static/shizuku_xp
+node_modules
