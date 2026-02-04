@@ -11,7 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from knowledge_base.clients.llm_client import LLMClient, create_llm_client
+from knowledge_base.common.resilient_gateway import (
+    ResilientGatewayClient,
+    ResilientGatewayConfig,
+)
 from knowledge_base.config.constants import (
     DEFAULT_LLM_MODEL,
     HALLUCINATION_THRESHOLD,
@@ -80,8 +83,8 @@ class HallucinationDetectorConfig(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    llm_client: LLMClient | None = Field(
-        default=None, description="LLM client instance"
+    gateway_client: ResilientGatewayClient | None = Field(
+        default=None, description="Resilient gateway client instance"
     )
     url: str = Field(default=LLM_GATEWAY_URL, description="LLM gateway URL")
     model: str = Field(default=DEFAULT_LLM_MODEL, description="Model name")
@@ -107,22 +110,23 @@ class HallucinationDetector:
             config: Detector configuration.
         """
         self._config = config or HallucinationDetectorConfig()
-        self._llm_client = self._config.llm_client
+        self._gateway_client = self._config.gateway_client
 
-    async def _get_llm_client(self) -> LLMClient:
-        """Get or create LLM client.
+    async def _get_gateway_client(self) -> ResilientGatewayClient:
+        """Get or create resilient gateway client.
 
         Returns:
-            LLM client instance.
+            Resilient gateway client instance.
         """
-        if self._llm_client is None:
-            self._llm_client = await create_llm_client(
+        if self._gateway_client is None:
+            gateway_config = ResilientGatewayConfig(
                 url=self._config.url,
                 model=self._config.model,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
-        return self._llm_client
+            self._gateway_client = ResilientGatewayClient(gateway_config)
+        return self._gateway_client
 
     async def verify_attribute(
         self,
@@ -144,7 +148,7 @@ class HallucinationDetector:
         Returns:
             Verification result for the attribute.
         """
-        client = await self._get_llm_client()
+        client = await self._get_gateway_client()
 
         system_prompt = """You are a factual verification expert. Your task is to determine
 whether an attribute claim is SUPPORTED or UNSUPPORTED based on the provided context.
@@ -175,12 +179,14 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = await client.complete_json(
+            response_text = await client.generate_text(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
+                json_mode=True,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
+            response = self._parse_json_response(response_text)
 
             status = VerificationStatus(response.get("status", "inconclusive"))
             confidence = float(response.get("confidence", 0.5))
@@ -204,6 +210,14 @@ Respond with JSON only:
                 evidence="",
                 explanation=f"Verification error: {str(e)}",
             )
+
+    @staticmethod
+    def _parse_json_response(response_text: str) -> dict[str, Any]:
+        """Parse JSON response from the LLM gateway."""
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return {}
 
     def _calculate_risk_level(
         self, entity_verification: EntityVerification

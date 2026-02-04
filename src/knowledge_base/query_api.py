@@ -308,7 +308,7 @@ async def execute_federated_query(
             ExecutionStrategyEnum.PRIORITY: ExecutionStrategy.PRIORITY,
         }
 
-        domain_matches = router._domain_detector.detect(
+        domain_matches = await router._domain_detector.detect_async(
             request.query,
             max_domains=request.max_domains,
             min_confidence=request.min_confidence,

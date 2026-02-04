@@ -2,12 +2,14 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any, Optional
 from pydantic import BaseModel
 from knowledge_base.intelligence.v1.hybrid_retriever import (
     HybridEntityRetriever,
     HybridRetrievalResult,
 )
+from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
 
 
 class QueryDomain(str, Enum):
@@ -112,6 +114,14 @@ class FederatedQueryResult:
 class DomainDetector:
     """Detects relevant domains from a query."""
 
+    DOMAIN_DESCRIPTIONS: dict[QueryDomain, str] = {
+        QueryDomain.TECHNICAL: "APIs, software engineering, infrastructure, debugging, and system design.",
+        QueryDomain.BUSINESS: "Business metrics, revenue, strategy, customers, and market insights.",
+        QueryDomain.DOCUMENTATION: "Documentation, guides, manuals, references, and how-to instructions.",
+        QueryDomain.RESEARCH: "Research papers, studies, experiments, analysis, and academic findings.",
+        QueryDomain.ANALYTICS: "Analytics, trends, dashboards, statistics, and reporting.",
+    }
+
     KEYWORDS: dict[QueryDomain, list[str]] = {
         QueryDomain.TECHNICAL: [
             "api",
@@ -195,13 +205,19 @@ class DomainDetector:
         ],
     }
 
-    def __init__(self, default_domain: QueryDomain = QueryDomain.GENERAL) -> None:
+    def __init__(
+        self,
+        default_domain: QueryDomain = QueryDomain.GENERAL,
+        embedding_client: EmbeddingClient | None = None,
+    ) -> None:
         """Initialize domain detector.
 
         Args:
             default_domain: Default domain if no match is found.
         """
         self._default_domain = default_domain
+        self._embedding_client = embedding_client
+        self._domain_embedding_cache: dict[QueryDomain, list[float]] = {}
 
     def detect(
         self,
@@ -249,6 +265,82 @@ class DomainDetector:
 
         matches.sort(key=lambda m: m.confidence, reverse=True)
         return matches[:max_domains]
+
+    async def detect_async(
+        self,
+        query: str,
+        max_domains: int = 3,
+        min_confidence: float = 0.3,
+        embedding_weight: float = 0.6,
+    ) -> list[DomainMatch]:
+        """Detect relevant domains using keywords + embeddings."""
+        keyword_matches = self.detect(
+            query=query,
+            max_domains=max_domains,
+            min_confidence=0.0,
+        )
+        keyword_scores = {match.domain: match for match in keyword_matches}
+
+        if self._embedding_client is None:
+            return [
+                match
+                for match in keyword_matches
+                if match.confidence >= min_confidence
+            ][:max_domains]
+
+        query_embedding = await self._embedding_client.embed_text(query)
+        domain_embeddings = await self._get_domain_embeddings()
+
+        combined_matches: list[DomainMatch] = []
+        for domain, domain_embedding in domain_embeddings.items():
+            similarity = self._cosine_similarity(query_embedding, domain_embedding)
+            keyword_match = keyword_scores.get(domain)
+            keyword_confidence = keyword_match.confidence if keyword_match else 0.0
+            combined_confidence = (
+                embedding_weight * similarity
+                + (1 - embedding_weight) * keyword_confidence
+            )
+            if combined_confidence >= min_confidence:
+                combined_matches.append(
+                    DomainMatch(
+                        domain=domain,
+                        confidence=combined_confidence,
+                        keywords=keyword_match.keywords if keyword_match else [],
+                    )
+                )
+
+        if not combined_matches:
+            return [DomainMatch(self._default_domain, 1.0, [])]
+
+        combined_matches.sort(key=lambda m: m.confidence, reverse=True)
+        return combined_matches[:max_domains]
+
+    async def _get_domain_embeddings(self) -> dict[QueryDomain, list[float]]:
+        """Get cached embeddings for domain descriptions."""
+        if self._domain_embedding_cache:
+            return self._domain_embedding_cache
+
+        if self._embedding_client is None:
+            return {}
+
+        for domain, description in self.DOMAIN_DESCRIPTIONS.items():
+            self._domain_embedding_cache[domain] = await self._embedding_client.embed_text(
+                description
+            )
+
+        return self._domain_embedding_cache
+
+    @staticmethod
+    def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        if not vec_a or not vec_b:
+            return 0.0
+        dot = sum(a * b for a, b in zip(vec_a, vec_b))
+        norm_a = math.sqrt(sum(a * a for a in vec_a))
+        norm_b = math.sqrt(sum(b * b for b in vec_b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
 
 class SubQueryBuilder:
@@ -481,7 +573,7 @@ class FederatedQueryRouter:
         self._retriever = retriever
         self._default_strategy = default_strategy
         self._timeout_seconds = timeout_seconds
-        self._domain_detector = DomainDetector()
+        self._domain_detector = DomainDetector(embedding_client=EmbeddingClient())
         self._sub_query_builder = SubQueryBuilder()
         self._aggregator = ResultAggregator()
 
@@ -641,7 +733,7 @@ class FederatedQueryRouter:
         Returns:
             FederatedQueryResult with aggregated results.
         """
-        domain_matches = self._domain_detector.detect(query)
+        domain_matches = await self._domain_detector.detect_async(query)
         domains = [m.domain for m in domain_matches]
 
         plan = self.create_plan(

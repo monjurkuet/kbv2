@@ -18,6 +18,8 @@ class RetrievedEntity:
     vector_score: float
     graph_score: float | None = None
     graph_hops: int | None = None
+    normalized_vector_score: float | None = None
+    normalized_graph_score: float | None = None
     final_score: float = 0.0
     source: str = "vector"
 
@@ -261,12 +263,36 @@ class HybridEntityRetriever:
         Returns:
             Sorted list of entities by final score.
         """
+        normalized_vector = iter(
+            self._normalize_scores(
+                [entity.vector_score for entity in entity_map.values()]
+            )
+        )
+        normalized_graph = self._normalize_scores(
+            [
+                entity.graph_score
+                for entity in entity_map.values()
+                if entity.graph_score is not None
+            ]
+        )
+
+        graph_iter = iter(normalized_graph)
         for entity in entity_map.values():
+            entity.normalized_vector_score = next(normalized_vector, 0.0)
+            if entity.graph_score is not None:
+                entity.normalized_graph_score = next(graph_iter, 0.0)
+            else:
+                entity.normalized_graph_score = 0.0
+
             if entity.graph_score is not None and entity.graph_score > 0:
-                graph_contribution = entity.graph_score * self._graph_weight
+                graph_contribution = entity.normalized_graph_score * self._graph_weight
                 entity.final_score = (
-                    entity.vector_score * self._vector_weight
+                    entity.normalized_vector_score * self._vector_weight
                 ) + graph_contribution
+            else:
+                entity.final_score = (
+                    entity.normalized_vector_score * self._vector_weight
+                )
 
         sorted_entities = sorted(
             entity_map.values(),
@@ -275,6 +301,17 @@ class HybridEntityRetriever:
         )
 
         return sorted_entities
+
+    @staticmethod
+    def _normalize_scores(scores: list[float]) -> list[float]:
+        """Normalize scores using min-max scaling."""
+        if not scores:
+            return []
+        min_score = min(scores)
+        max_score = max(scores)
+        if max_score - min_score <= 1e-8:
+            return [1.0 for _ in scores]
+        return [(score - min_score) / (max_score - min_score) for score in scores]
 
 
 class GraphEntity:
