@@ -225,7 +225,10 @@ class IngestionOrchestrator:
         self._log_broadcast = log_broadcast
         # Set up the global WebSocket broadcast function for extraction logging
         if log_broadcast:
-            from knowledge_base.intelligence.v1.extraction_logging import set_websocket_broadcast
+            from knowledge_base.intelligence.v1.extraction_logging import (
+                set_websocket_broadcast,
+            )
+
             set_websocket_broadcast(log_broadcast)
         self._observability: Observability | None = None
         self._gateway: GatewayClient | None = None
@@ -248,6 +251,7 @@ class IngestionOrchestrator:
         self._observability = Observability()
         # Initialize gateway with continuous rotation enabled for robust model failover
         from knowledge_base.common.resilient_gateway import ResilientGatewayConfig
+
         gateway_config = ResilientGatewayConfig(
             continuous_rotation_enabled=True,  # Enable continuous model rotation
             rotation_delay=5.0,  # 5 second delay between rotation cycles
@@ -1127,7 +1131,7 @@ class IngestionOrchestrator:
                     existing_link_result = await session.execute(
                         select(ChunkEntity).where(
                             ChunkEntity.chunk_id == link.chunk_id,
-                            ChunkEntity.entity_id == target_id
+                            ChunkEntity.entity_id == target_id,
                         )
                     )
                     if existing_link_result.scalar_one_or_none():
@@ -1156,7 +1160,9 @@ class IngestionOrchestrator:
 
             for i, entity in enumerate(all_entities):
                 if i % 10 == 0:
-                    logger.info(f"Deduplication progress: {i}/{total} candidates processed...")
+                    logger.info(
+                        f"Deduplication progress: {i}/{total} candidates processed..."
+                    )
 
                 # Similar logic to _resolve_entities but targeting the whole DB
                 embedding = entity.embedding
@@ -1573,28 +1579,28 @@ class IngestionOrchestrator:
                     list(chunks), document.id
                 )
 
-            entities, edges = self._convert_extraction_to_entities(
-                extracted_entities, chunks
-            )
+                entities, edges = self._convert_extraction_to_entities(
+                    extracted_entities, chunks
+                )
 
-            verifications = []
-            if self._hallucination_detector and entities:
-                for entity in entities:
-                    entity_dict = {
-                        "name": entity.name,
-                        "type": entity.entity_type,
-                        "attributes": entity.properties or {},
-                        "context": entity.source_text or "",
-                    }
-                    verification = await self._hallucination_detector.verify_entity(
-                        entity_name=entity.name,
-                        entity_type=entity.entity_type or "UNKNOWN",
-                        attributes=entity.properties or {},
-                        context=entity.source_text or "",
-                    )
-                    verifications.append(verification)
+                verifications = []
+                if self._hallucination_detector and entities:
+                    for entity in entities:
+                        entity_dict = {
+                            "name": entity.name,
+                            "type": entity.entity_type,
+                            "attributes": entity.properties or {},
+                            "context": entity.source_text or "",
+                        }
+                        verification = await self._hallucination_detector.verify_entity(
+                            entity_name=entity.name,
+                            entity_type=entity.entity_type or "UNKNOWN",
+                            attributes=entity.properties or {},
+                            context=entity.source_text or "",
+                        )
+                        verifications.append(verification)
 
-            return entities, edges, quality_score, verifications
+                return entities, edges, quality_score, verifications
 
         except Exception as e:
             logger.error(f"Multi-agent extraction failed: {str(e)}")
@@ -1743,7 +1749,9 @@ class IngestionOrchestrator:
                 )
 
                 # Adaptive analysis: Let LLM decide optimal processing strategy
-                await self._emit_progress(2.5, "started", "Analyzing document complexity")
+                await self._emit_progress(
+                    2.5, "started", "Analyzing document complexity"
+                )
 
                 # Combine first few chunks for analysis (avoid token limits)
                 async with self._vector_store.get_session() as session:
@@ -1758,14 +1766,17 @@ class IngestionOrchestrator:
                     recommendation = await self._adaptive_engine.analyze_document(
                         document_text=sample_text,
                         document_name=document.name,
-                        file_size_bytes=sum([len(chunk.text) for chunk in sample_chunks])
+                        file_size_bytes=sum(
+                            [len(chunk.text) for chunk in sample_chunks]
+                        ),
                     )
 
                 await self._emit_progress(
-                    2.5, "completed",
+                    2.5,
+                    "completed",
                     f"Analysis complete: {recommendation.complexity.value}, "
                     f"{recommendation.expected_entity_count} entities expected, "
-                    f"{recommendation.estimated_processing_time} processing time"
+                    f"{recommendation.estimated_processing_time} processing time",
                 )
 
                 await self._emit_progress(
@@ -1816,7 +1827,9 @@ class IngestionOrchestrator:
                     8, "started", "Updating domain for document and entities"
                 )
                 final_domain = (
-                    domain if domain is not None else await self._determine_domain(document)
+                    domain
+                    if domain is not None
+                    else await self._determine_domain(document)
                 )
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
