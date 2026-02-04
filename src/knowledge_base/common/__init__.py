@@ -1,6 +1,95 @@
-"""Common utilities and clients."""
+"""Common utilities for KBV2."""
 
-from knowledge_base.common.gateway import GatewayClient
-from knowledge_base.common.temporal_utils import TemporalNormalizer
+from .exceptions import (
+    KBV2BaseException,
+    # Ingestion
+    IngestionError,
+    DocumentParseError,
+    ChunkingError,
+    EmbeddingError,
+    # Extraction
+    ExtractionError,
+    EntityExtractionError,
+    RelationshipExtractionError,
+    HallucinationDetectionError,
+    # Resolution
+    ResolutionError,
+    EntityResolutionError,
+    DuplicateEntityError,
+    # Validation
+    ValidationError,
+    SchemaValidationError,
+    TypeValidationError,
+    DomainValidationError,
+    # LLM Client
+    LLMClientError,
+    LLMTimeoutError,
+    LLMRateLimitError,
+    LLMConnectionError,
+    LLMResponseError,
+    CircuitBreakerOpenError,
+    # Database
+    DatabaseError,
+    SessionError,
+    QueryError,
+    MigrationError,
+    # Configuration
+    ConfigurationError,
+    MissingConfigurationError,
+    InvalidConfigurationError,
+    # Clustering
+    ClusteringError,
+    ClusteringResolutionError,
+    InsufficientDataError,
+    # Review Queue
+    ReviewQueueError,
+    ReviewItemNotFoundError,
+    ReviewQueueFullError,
+)
 
-__all__ = ["GatewayClient", "TemporalNormalizer"]
+__all__ = [
+    "KBV2BaseException",
+    # Ingestion
+    "IngestionError",
+    "DocumentParseError",
+    "ChunkingError",
+    "EmbeddingError",
+    # Extraction
+    "ExtractionError",
+    "EntityExtractionError",
+    "RelationshipExtractionError",
+    "HallucinationDetectionError",
+    # Resolution
+    "ResolutionError",
+    "EntityResolutionError",
+    "DuplicateEntityError",
+    # Validation
+    "ValidationError",
+    "SchemaValidationError",
+    "TypeValidationError",
+    "DomainValidationError",
+    # LLM Client
+    "LLMClientError",
+    "LLMTimeoutError",
+    "LLMRateLimitError",
+    "LLMConnectionError",
+    "LLMResponseError",
+    "CircuitBreakerOpenError",
+    # Database
+    "DatabaseError",
+    "SessionError",
+    "QueryError",
+    "MigrationError",
+    # Configuration
+    "ConfigurationError",
+    "MissingConfigurationError",
+    "InvalidConfigurationError",
+    # Clustering
+    "ClusteringError",
+    "ClusteringResolutionError",
+    "InsufficientDataError",
+    # Review Queue
+    "ReviewQueueError",
+    "ReviewItemNotFoundError",
+    "ReviewQueueFullError",
+]
