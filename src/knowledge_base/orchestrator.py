@@ -248,7 +248,7 @@ class IngestionOrchestrator:
 
             # Use the chunker from DocumentPipelineService
             chunker = self._document_service._chunker
-            chunks = chunker.partition(content)
+            chunks = chunker.chunk(content)
 
             async with self._vector_store.get_session() as session:
                 for chunk_data in chunks:
@@ -316,14 +316,20 @@ class IngestionOrchestrator:
                     recommendation=recommendation,
                 )
 
-                # Deduplicate entities by URI
+                # Deduplicate entities by URI and track ID remapping
                 uri_to_id: dict[str, UUID] = {}
                 unique_entities = []
+                entity_id_map: dict[UUID, UUID] = {}  # Maps original ID -> final ID
+                added_entity_ids: set[UUID] = set()  # Track which entities were actually added to DB
 
+                # First pass: Check all entities and build ID map
                 for entity in entities:
                     if entity.uri in uri_to_id:
                         # Already saw this entity in this extraction
                         continue
+
+                    # Store original ID before any modification
+                    original_id = entity.id
 
                     # Query for existing entity with same URI in database
                     result = await session.execute(
@@ -335,21 +341,51 @@ class IngestionOrchestrator:
                         uri_to_id[entity.uri] = existing.id
                         # Update extraction entities to use the existing ID for edge mapping
                         entity.id = existing.id
+                        # Track the ID remapping
+                        entity_id_map[original_id] = existing.id
+                        # Don't add existing entities to session
                     else:
-                        session.add(entity)
                         uri_to_id[entity.uri] = entity.id
                         unique_entities.append(entity)
+                        # ID didn't change, so map to itself
+                        entity_id_map[original_id] = original_id
+                        # Add only new entities to session
+                        session.add(entity)
+                        added_entity_ids.add(entity.id)
 
                 await session.flush()
 
                 # Map edges using potentially updated IDs from deduplication
+                # Build a set of entity IDs that exist in the database (newly added)
+                # Also include existing entities that are referenced in our extraction
+                database_entity_ids = added_entity_ids.copy()
+                
+                # Query to get all entity IDs that exist in the database from our extraction
+                for entity in entities:
+                    # Check if this entity exists in the database
+                    result = await session.execute(
+                        select(Entity.id).where(Entity.uri == entity.uri)
+                    )
+                    db_entity_id = result.scalar_one_or_none()
+                    if db_entity_id:
+                        database_entity_ids.add(db_entity_id)
+                
                 for edge in edges:
                     if (
                         edge.source_id
                         and edge.target_id
                         and edge.source_id != edge.target_id
                     ):
-                        session.add(edge)
+                        # Update edge source_id if it was remapped
+                        if edge.source_id in entity_id_map:
+                            edge.source_id = entity_id_map[edge.source_id]
+                        # Update edge target_id if it was remapped
+                        if edge.target_id in entity_id_map:
+                            edge.target_id = entity_id_map[edge.target_id]
+                        
+                        # Only add edge if both source and target entities exist in the database
+                        if edge.source_id in database_entity_ids and edge.target_id in database_entity_ids:
+                            session.add(edge)
 
                 # Map entities to chunks (for gleaning extraction)
                 if not quality_score:  # Gleaning mode
@@ -950,22 +986,16 @@ class IngestionOrchestrator:
                 "document_ingestion",
                 file_path=str(file_path),
             ):
-                await self._emit_progress(1, "started", "Creating document record")
+                await self._send_progress({"step": 1, "status": "started", "message": "Creating document record"})
                 document = await self._create_document(file_path, document_name)
-                await self._emit_progress(1, "completed", "Document record created")
+                await self._send_progress({"step": 1, "status": "completed", "message": "Document record created"})
 
-                await self._emit_progress(
-                    2, "started", "Partitioning document into chunks"
-                )
+                await self._send_progress({"step": 2, "status": "started", "message": "Partitioning document into chunks"})
                 document = await self._partition_document(document, file_path)
-                await self._emit_progress(
-                    2, "completed", "Document partitioned into chunks"
-                )
+                await self._send_progress({"step": 2, "status": "completed", "message": "Document partitioned into chunks"})
 
                 # Adaptive analysis: Let LLM decide optimal processing strategy
-                await self._emit_progress(
-                    2.5, "started", "Analyzing document complexity"
-                )
+                await self._send_progress({"step": 2.5, "status": "started", "message": "Analyzing document complexity"})
 
                 # Combine first few chunks for analysis (avoid token limits)
                 async with self._vector_store.get_session() as session:
@@ -985,61 +1015,37 @@ class IngestionOrchestrator:
                         ),
                     )
 
-                await self._emit_progress(
-                    2.5,
-                    "completed",
-                    f"Analysis complete: {recommendation.complexity.value}, "
-                    f"{recommendation.expected_entity_count} entities expected, "
-                    f"{recommendation.estimated_processing_time} processing time",
-                )
+                await self._send_progress({"step": 2.5, "status": "completed", "message": f"Analysis complete: {recommendation.complexity.value}, {recommendation.expected_entity_count} entities expected, {recommendation.estimated_processing_time} processing time"})
 
-                await self._emit_progress(
-                    3, "started", "Extracting knowledge (entities and edges)"
-                )
+                await self._send_progress({"step": 3, "status": "started", "message": "Extracting knowledge (entities and edges)"})
                 document = await self._extract_knowledge(document, recommendation)
-                await self._emit_progress(
-                    3, "completed", "Knowledge extraction complete"
-                )
+                await self._send_progress({"step": 3, "status": "completed", "message": "Knowledge extraction complete"})
 
-                await self._emit_progress(3.5, "started", "Refining entity types")
+                await self._send_progress({"step": 3.5, "status": "started", "message": "Refining entity types"})
                 document = await self._refine_entity_types(document)
-                await self._emit_progress(
-                    3.5, "completed", "Entity type refinement complete"
-                )
+                await self._send_progress({"step": 3.5, "status": "completed", "message": "Entity type refinement complete"})
 
-                await self._emit_progress(
-                    3.75, "started", "Validating entities against schema"
-                )
+                await self._send_progress({"step": 3.75, "status": "started", "message": "Validating entities against schema"})
                 document = await self._validate_entities_against_schema(document)
-                await self._emit_progress(
-                    3.75, "completed", "Entity schema validation complete"
-                )
+                await self._send_progress({"step": 3.75, "status": "completed", "message": "Entity schema validation complete"})
 
-                await self._emit_progress(4, "started", "Embedding chunks and entities")
+                await self._send_progress({"step": 4, "status": "started", "message": "Embedding chunks and entities"})
                 document = await self._embed_content(document)
-                await self._emit_progress(4, "completed", "Embedding complete")
+                await self._send_progress({"step": 4, "status": "completed", "message": "Embedding complete"})
 
-                await self._emit_progress(5, "started", "Resolving duplicate entities")
+                await self._send_progress({"step": 5, "status": "started", "message": "Resolving duplicate entities"})
                 document = await self._resolve_entities(document)
-                await self._emit_progress(5, "completed", "Entity resolution complete")
+                await self._send_progress({"step": 5, "status": "completed", "message": "Entity resolution complete"})
 
-                await self._emit_progress(
-                    6, "started", "Clustering entities into communities"
-                )
+                await self._send_progress({"step": 6, "status": "started", "message": "Clustering entities into communities"})
                 document = await self._cluster_entities(document)
-                await self._emit_progress(6, "completed", "Entity clustering complete")
+                await self._send_progress({"step": 6, "status": "completed", "message": "Entity clustering complete"})
 
-                await self._emit_progress(
-                    7, "started", "Generating intelligence reports"
-                )
+                await self._send_progress({"step": 7, "status": "started", "message": "Generating intelligence reports"})
                 document = await self._generate_reports(document)
-                await self._emit_progress(
-                    7, "completed", "Intelligence reports generated"
-                )
+                await self._send_progress({"step": 7, "status": "completed", "message": "Intelligence reports generated"})
 
-                await self._emit_progress(
-                    8, "started", "Updating domain for document and entities"
-                )
+                await self._send_progress({"step": 8, "status": "started", "message": "Updating domain for document and entities"})
                 final_domain = (
                     domain
                     if domain is not None
@@ -1069,9 +1075,9 @@ class IngestionOrchestrator:
                     for edge in edge_result.scalars().all():
                         edge.domain = str(final_domain) if final_domain else None
                     await session.commit()
-                await self._emit_progress(8, "completed", "Domain updated successfully")
+                await self._send_progress({"step": 8, "status": "completed", "message": "Domain updated successfully"})
 
-                await self._emit_progress(9, "started", "Finalizing document status")
+                await self._send_progress({"step": 9, "status": "started", "message": "Finalizing document status"})
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
                     if doc_to_update:
@@ -1080,9 +1086,7 @@ class IngestionOrchestrator:
                         refreshed_doc = await session.get(Document, document.id)
                         if refreshed_doc:
                             document = refreshed_doc
-                await self._emit_progress(
-                    9, "completed", "Document processing complete"
-                )
+                await self._send_progress({"step": 9, "status": "completed", "message": "Document processing complete"})
 
                 obs.log_event(
                     "document_processing_completed",
@@ -1108,6 +1112,19 @@ class IngestionOrchestrator:
                 level="error",
             )
             raise
+
+    def _get_mime_type(self, path: Path) -> str:
+        """Get the MIME type of a file.
+        
+        Args:
+            path: Path to the file.
+            
+        Returns:
+            MIME type string.
+        """
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(str(path))
+        return mime_type or "application/octet-stream"
 
     async def _create_document(
         self, file_path: str | Path, document_name: str | None = None

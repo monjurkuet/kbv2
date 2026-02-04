@@ -195,6 +195,8 @@ class Document(Base):
         onupdate=datetime.utcnow,
     )
     domain = Column(String(100), nullable=True, index=True)
+    community_reports_generated = Column(Integer, nullable=False, default=0)
+    total_communities = Column(Integer, nullable=False, default=0)
 
     chunks = relationship(
         "Chunk", back_populates="document", cascade="all, delete-orphan"
@@ -271,6 +273,8 @@ class Entity(Base):
     )  # Unique identifier following RDF patterns
     source_text = Column(Text, nullable=True)  # For provenance tracking
     domain = Column(String(100), nullable=True, index=True)
+    community_reports_generated = Column(Integer, nullable=False, default=0)
+    total_communities = Column(Integer, nullable=False, default=0)
 
     chunks = relationship(
         "Chunk", secondary="chunk_entities", back_populates="entities"
@@ -345,6 +349,8 @@ class Edge(Base):
         Boolean, nullable=False, default=True
     )  # Explicit direction flag
     domain = Column(String(100), nullable=True, index=True)
+    community_reports_generated = Column(Integer, nullable=False, default=0)
+    total_communities = Column(Integer, nullable=False, default=0)
 
     source_entity = relationship(
         "Entity",

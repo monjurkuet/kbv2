@@ -57,8 +57,8 @@ DEFAULT_CLUSTER_RESOLUTION: Final[float] = 1.0
 # ============================================================================
 # EMBEDDING CONFIGURATION
 # ============================================================================
-DEFAULT_EMBEDDING_MODEL: Final[str] = "nomic-embed-text"
-EMBEDDING_DIMENSION: Final[int] = 768
+DEFAULT_EMBEDDING_MODEL: Final[str] = "bge-m3"
+EMBEDDING_DIMENSION: Final[int] = 1024
 
 # ============================================================================
 # LLM CONFIGURATION
