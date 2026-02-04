@@ -323,10 +323,10 @@ class DomainDetector:
         if self._embedding_client is None:
             return {}
 
-        for domain, description in self.DOMAIN_DESCRIPTIONS.items():
-            self._domain_embedding_cache[domain] = await self._embedding_client.embed_text(
-                description
-            )
+        domains = list(self.DOMAIN_DESCRIPTIONS.keys())
+        descriptions = list(self.DOMAIN_DESCRIPTIONS.values())
+        embeddings = await self._embedding_client.embed_batch(descriptions)
+        self._domain_embedding_cache = dict(zip(domains, embeddings))
 
         return self._domain_embedding_cache
 
