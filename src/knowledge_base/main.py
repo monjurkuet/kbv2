@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from contextlib import asynccontextmanager
 
 from knowledge_base.common.aip193_middleware import AIP193ResponseMiddleware
 from knowledge_base.common.error_handlers import setup_exception_handlers
@@ -39,6 +40,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown."""
+    # Startup logic
+    await startup_event()
+    yield
+    # Shutdown logic
+    await shutdown_event()
+
+
 app = FastAPI(
     title="KBV2 Knowledge Base API",
     description="High-fidelity information extraction and graph visualization API",
@@ -46,6 +57,7 @@ app = FastAPI(
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
     openapi_url="/api/v1/openapi.json",
+    lifespan=lifespan,
 )
 
 
@@ -163,6 +175,7 @@ async def get_openapi():
 # Mount static files for the Windows XP WebSocket client
 # Mount static files for the Windows XP WebSocket client
 import os
+
 dashboard_version = os.getenv("DASHBOARD_VERSION", "v1")
 base_static_dir = Path(__file__).parent / "static"
 
@@ -173,13 +186,16 @@ else:
 
 if not static_dir.exists():
     # Fallback or just log
-    logger.warning(f"Static directory {static_dir} does not exist. Dashboard may not load.")
+    logger.warning(
+        f"Static directory {static_dir} does not exist. Dashboard may not load."
+    )
 else:
     logger.info(f"Mounting dashboard version {dashboard_version} from {static_dir}")
-    app.mount("/dashboard", StaticFiles(directory=str(static_dir), html=True), name="static")
+    app.mount(
+        "/dashboard", StaticFiles(directory=str(static_dir), html=True), name="static"
+    )
 
 
-@app.on_event("startup")
 async def startup_event():
     """
     Startup event handler for application initialization.
@@ -527,7 +543,9 @@ async def startup_event():
 
                 for config in DOMAIN_CONFIGS:
                     # Convert list of EntityTypeDef to dict with type_name as key
-                    entity_types_dict = {et.type_name: et for et in config["entity_types"]}
+                    entity_types_dict = {
+                        et.type_name: et for et in config["entity_types"]
+                    }
                     schema = DomainSchemaCreate(
                         domain_name=config["domain_name"],
                         domain_display_name=config["domain_display_name"],
@@ -548,7 +566,6 @@ async def startup_event():
     logger.info("KBV2 API startup complete")
 
 
-@app.on_event("shutdown")
 async def shutdown_event():
     """
     Shutdown event handler for graceful cleanup.

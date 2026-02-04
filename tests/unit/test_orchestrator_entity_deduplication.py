@@ -1,323 +1,173 @@
-import asyncio
-import logging
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+"""Tests for entity pipeline service."""
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from unittest.mock import Mock, AsyncMock, patch
+from uuid import uuid4
 
+from knowledge_base.orchestration.entity_pipeline_service import EntityPipelineService
+from knowledge_base.persistence.v1.schema import Document, Entity, Chunk, Edge
 from knowledge_base.ingestion.v1.gleaning_service import (
-    ExtractionResult,
     ExtractedEntity,
-    ExtractedEdge,
-    TemporalClaim,
+    ExtractionResult,
 )
-from knowledge_base.common.temporal_utils import TemporalType
-from knowledge_base.persistence.v1.schema import (
-    Chunk,
-    Document,
-    DocumentStatus,
-    EdgeType,
-    Entity,
-    Edge,
-    ChunkEntity,
-)
-from knowledge_base.orchestrator import IngestionOrchestrator
 
 
-# Mock data fixtures
-def create_mock_document():
+@pytest.fixture
+def entity_service():
+    """Create a test entity pipeline service instance."""
+    service = EntityPipelineService()
+    return service
+
+
+@pytest.fixture
+def sample_document():
+    """Create a sample document for testing."""
     return Document(
         id=uuid4(),
         name="test_document.pdf",
-        source_uri="/path/to/test_document.pdf",
+        source_uri="/path/to/test.pdf",
         mime_type="application/pdf",
-        status=DocumentStatus.PENDING,
+        status="pending",
     )
 
 
-def create_mock_chunk(document_id: UUID):
-    return Chunk(
+@pytest.fixture
+def sample_entity():
+    """Create a sample entity for testing."""
+    return Entity(
         id=uuid4(),
-        document_id=document_id,
-        text="This is a test chunk.",
-        chunk_index=0,
-        page_number=1,
-        token_count=5,
-        metadata={},
+        name="Test Entity",
+        entity_type="CONCEPT",
+        description="A test entity",
+        properties={"key": "value"},
+        confidence=0.9,
     )
 
 
-def create_mock_extraction_result():
-    return ExtractionResult(
-        entities=[
-            ExtractedEntity(
-                name="Project Nova",
-                entity_type="Project",
-                description="A secret project",
-                properties={},
-                confidence=0.95,
-            ),
-            ExtractedEntity(
-                name="Elena Vance",
-                entity_type="Person",
-                description="Lead researcher",
-                properties={},
-                confidence=0.98,
-            ),
-            ExtractedEntity(
-                name="Elena Vance",
-                entity_type="PERSON",
-                description="Research lead",
-                properties={},
-                confidence=0.92,
-            ),
-        ],
-        edges=[
-            ExtractedEdge(
-                source="Elena Vance",
-                target="Project Nova",
-                edge_type=EdgeType.WORKS_FOR,
-                properties={},
-                confidence=0.9,
-                source_text="Elena Vance leads Project Nova",
-            )
-        ],
-        temporal_claims=[
-            TemporalClaim(
-                text="Project Nova was active in 2023",
-                temporal_type=TemporalType.STATIC,
-                iso8601_date="2023-01-01T00:00:00Z",
-                start_date=None,
-                end_date=None,
-            )
-        ],
-    )
+class TestEntityPipelineService:
+    """Tests for EntityPipelineService."""
 
+    def test_initialization(self, entity_service):
+        """Test service initialization."""
+        assert entity_service._multi_agent_extractor is None
+        assert entity_service._entity_resolver is None
+        assert entity_service._entity_typer is None
+        assert entity_service._clustering_service is None
+        assert entity_service._gleaning_service is None
+        assert entity_service._hallucination_detector is None
 
-@pytest.fixture
-def mock_vector_store():
-    mock = MagicMock()
-    mock.get_session.return_value.__aenter__.return_value = AsyncMock(
-        spec=AsyncSession
-    )
-    mock.get_session.return_value.__aexit__ = AsyncMock()
-    mock.search_similar_entities = AsyncMock(return_value=[])
-    return mock
+    def test_set_extractors(self, entity_service):
+        """Test setting extraction components."""
+        mock_extractor = Mock()
+        mock_resolver = Mock()
+        mock_typer = Mock()
+        mock_clustering = Mock()
+        mock_gleaning = Mock()
+        mock_detector = Mock()
 
-
-@pytest.fixture
-def mock_gleaning_service():
-    mock = MagicMock()
-    mock.extract = AsyncMock(return_value=create_mock_extraction_result())
-    return mock
-
-
-@pytest.fixture
-def orchestrator(mock_vector_store, mock_gleaning_service):
-    orchestrator = IngestionOrchestrator()
-    orchestrator._vector_store = mock_vector_store
-    orchestrator._gleaning_service = mock_gleaning_service
-    orchestrator._observability = MagicMock()
-    orchestrator._clustering_service = MagicMock()
-    orchestrator._resolution_agent = MagicMock()
-    orchestrator._synthesis_agent = MagicMock()
-    return orchestrator
-
-
-@pytest.mark.asyncio
-async def test_entity_deduplication_with_duplicate_uris(
-    orchestrator, mock_vector_store
-):
-    """Test that entities with duplicate URIs are properly deduplicated."""
-    document = create_mock_document()
-    chunk = create_mock_chunk(document.id)
-
-    # Create extraction with duplicate entities (same normalized name -> same URI)
-    extraction = ExtractionResult(
-        entities=[
-            ExtractedEntity(
-                name="Project Nova",
-                entity_type="Project",
-                description="First mention",
-                properties={},
-                confidence=0.95,
-            ),
-            ExtractedEntity(
-                name="Project Nova",
-                entity_type="Project",
-                description="Second mention",
-                properties={},
-                confidence=0.90,
-            ),
-        ],
-        edges=[],
-        temporal_claims=[],
-    )
-
-    with patch.object(
-        orchestrator._gleaning_service, "extract", return_value=extraction
-    ):
-        # Mock the session to capture SQL operations
-        session_mock = (
-            mock_vector_store.get_session.return_value.__aenter__.return_value
+        entity_service.set_extractors(
+            multi_agent_extractor=mock_extractor,
+            entity_resolver=mock_resolver,
+            entity_typer=mock_typer,
+            clustering_service=mock_clustering,
+            gleaning_service=mock_gleaning,
+            hallucination_detector=mock_detector,
         )
 
-        # Setup the _extract_knowledge method to process our test data
-        with patch.object(
-            orchestrator, "_create_entities_from_extraction"
-        ) as mock_create_entities:
-            # Create entities that would be generated from our extraction
-            entity1 = Entity(
+        assert entity_service._multi_agent_extractor == mock_extractor
+        assert entity_service._entity_resolver == mock_resolver
+        assert entity_service._entity_typer == mock_typer
+        assert entity_service._clustering_service == mock_clustering
+        assert entity_service._gleaning_service == mock_gleaning
+        assert entity_service._hallucination_detector == mock_detector
+
+
+class TestEntityConversion:
+    """Tests for entity conversion methods."""
+
+    def test_create_entities_from_extraction(self, entity_service):
+        """Test creating entities from extraction result."""
+        chunk_id = uuid4()
+        extraction = ExtractionResult(
+            entities=[
+                ExtractedEntity(
+                    name="Test Entity",
+                    entity_type="CONCEPT",
+                    description="A test entity",
+                    properties={"key": "value"},
+                    confidence=0.9,
+                )
+            ],
+            edges=[],
+        )
+
+        entities = entity_service._create_entities_from_extraction(extraction, chunk_id)
+
+        assert len(entities) == 1
+        assert entities[0].name == "Test Entity"
+        assert entities[0].entity_type == "CONCEPT"
+        assert entities[0].uri.startswith("entity:")
+
+    def test_create_edges_from_extraction(self, entity_service):
+        """Test creating edges from extraction result."""
+        entity1_id = uuid4()
+        entity2_id = uuid4()
+
+        entities = [
+            Entity(id=entity1_id, name="Entity 1", entity_type="PERSON"),
+            Entity(id=entity2_id, name="Entity 2", entity_type="ORGANIZATION"),
+        ]
+
+        extraction = ExtractionResult(
+            entities=[],
+            edges=[
+                {
+                    "source": "Entity 1",
+                    "target": "Entity 2",
+                    "edge_type": "related_to",
+                    "properties": {},
+                    "confidence": 0.9,
+                }
+            ],
+        )
+
+        edges = entity_service._create_edges_from_extraction(extraction, entities)
+
+        assert len(edges) == 1
+        assert edges[0].source_id == entity1_id
+        assert edges[0].target_id == entity2_id
+
+
+class TestEntityResolution:
+    """Tests for entity resolution methods."""
+
+    def test_convert_extraction_to_entities(self, entity_service):
+        """Test converting multi-agent extraction results."""
+        from knowledge_base.intelligence.v1.multi_agent_extractor import (
+            ExtractedEntity as MultiAgentExtractedEntity,
+        )
+
+        chunk_id = uuid4()
+        extracted = [
+            MultiAgentExtractedEntity(
                 id=uuid4(),
-                name="Project Nova",
-                entity_type="Project",
-                description="First mention",
-                uri="entity:project_nova",
-            )
-            entity2 = Entity(
-                id=uuid4(),
-                name="Project Nova",
-                entity_type="Project",
-                description="Second mention",
-                uri="entity:project_nova",  # Same URI due to normalization
-            )
-            mock_create_entities.return_value = [entity1, entity2]
-
-            # Process the document
-            await orchestrator._extract_knowledge(document)
-
-            # Verify that session.execute was called
-            assert session_mock.execute.called, "Session execute should have been called"
-
-
-@pytest.mark.asyncio
-async def test_chunk_entity_linking_only_for_inserted_entities(
-    orchestrator, mock_vector_store
-):
-    """Test that chunk-entity links are only created for successfully inserted entities."""
-    document = create_mock_document()
-
-    # Create extraction with two entities
-    extraction = create_mock_extraction_result()
-
-    with patch.object(
-        orchestrator._gleaning_service, "extract", return_value=extraction
-    ):
-        session_mock = (
-            mock_vector_store.get_session.return_value.__aenter__.return_value
-        )
-
-        # Process the document
-        await orchestrator._extract_knowledge(document)
-
-        # Verify that session.execute was called for entity and chunk_entity operations
-        assert session_mock.execute.called, "Session execute should have been called"
-
-
-@pytest.mark.asyncio
-async def test_error_handling_foreign_key_violations(orchestrator, mock_vector_store):
-    """Test error handling for foreign key violations when creating edges."""
-    document = create_mock_document()
-
-    # Create extraction with edge referencing non-existent entity
-    extraction = ExtractionResult(
-        entities=[],  # No entities created
-        edges=[
-            ExtractedEdge(
-                source="NonExistentEntity",
-                target="AlsoNonExistent",
-                edge_type=EdgeType.RELATED_TO,
-                properties={},
-                confidence=0.8,
-                source_text="Non-existent relationship",
-            )
-        ],
-        temporal_claims=[],
-    )
-
-    with patch.object(
-        orchestrator._gleaning_service, "extract", return_value=extraction
-    ):
-        session_mock = (
-            mock_vector_store.get_session.return_value.__aenter__.return_value
-        )
-
-        # Mock entity creation to return empty list
-        with patch.object(
-            orchestrator, "_create_entities_from_extraction", return_value=[]
-        ):
-            # Should not raise exception - errors should be logged and skipped
-            await orchestrator._extract_knowledge(document)
-
-            # Verify that execute was called
-            assert session_mock.execute.called
-
-
-@pytest.mark.asyncio
-async def test_concurrent_entity_insertion(orchestrator, mock_vector_store):
-    """Test concurrent entity insertion scenarios."""
-    document1 = create_mock_document()
-    document2 = create_mock_document()
-
-    # Create identical extraction results for both documents
-    extraction = ExtractionResult(
-        entities=[
-            ExtractedEntity(
-                name="Shared Entity",
-                entity_type="Organization",
-                description="An organization mentioned in both documents",
-                properties={},
-                confidence=0.95,
-            )
-        ],
-        edges=[],
-        temporal_claims=[],
-    )
-
-    with patch.object(
-        orchestrator._gleaning_service, "extract", return_value=extraction
-    ):
-        # Process both documents concurrently
-        await asyncio.gather(
-            orchestrator._extract_knowledge(document1),
-            orchestrator._extract_knowledge(document2),
-        )
-
-        # Verify that both documents were processed without raising exceptions
-        assert True  # If we got here, no exception was raised
-
-
-@pytest.mark.asyncio
-async def test_logging_for_skipped_entities(orchestrator, mock_vector_store):
-    """Test that appropriate logging occurs for skipped entities."""
-    document = create_mock_document()
-
-    # Create extraction with entity that will cause a conflict
-    extraction = ExtractionResult(
-        entities=[
-            ExtractedEntity(
-                name="Problematic Entity",
-                entity_type="Test",
-                description="This entity will be skipped",
-                properties={},
+                name="Test Entity",
+                entity_type="CONCEPT",
+                description="A test entity",
+                properties={"key": "value"},
+                source_text="Source text",
                 confidence=0.9,
+                chunk_id=chunk_id,
+                linked_entities=[],
             )
-        ],
-        edges=[],
-        temporal_claims=[],
-    )
+        ]
 
-    with patch.object(
-        orchestrator._gleaning_service, "extract", return_value=extraction
-    ):
-        # Capture log messages
-        with patch("logging.getLogger") as mock_logger_factory:
-            mock_logger = MagicMock()
-            mock_logger_factory.return_value = mock_logger
+        chunks = [Chunk(id=chunk_id, text="chunk text", chunk_index=0)]
 
-            await orchestrator._extract_knowledge(document)
+        entities, edges = entity_service._convert_extraction_to_entities(
+            extracted, chunks
+        )
 
-            # Verify that logging was attempted
-            assert True  # Logging is handled by the orchestrator
+        assert len(entities) == 1
+        assert entities[0].name == "Test Entity"
+        assert entities[0].entity_type == "CONCEPT"

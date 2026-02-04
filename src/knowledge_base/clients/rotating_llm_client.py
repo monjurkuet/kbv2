@@ -9,6 +9,15 @@ import time
 from typing import Any, Dict, List, Optional, Union
 import logging
 
+import warnings
+
+warnings.warn(
+    "rotating_llm_client is deprecated since v0.6.0. "
+    "Use ResilientGatewayClient from knowledge_base.common.resilient_gateway.gateway instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import httpx
 from pydantic import BaseModel, Field
 

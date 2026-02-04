@@ -9,6 +9,16 @@ import json
 from typing import Any, Callable
 from enum import Enum
 
+import warnings
+
+warnings.warn(
+    "llm_client is deprecated since v0.6.0. "
+    "Use ResilientGatewayClient from knowledge_base.common.resilient_gateway.gateway instead, "
+    "or UnifiedLLMClient from knowledge_base.clients.unified_llm_client.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict

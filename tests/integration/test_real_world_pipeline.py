@@ -38,6 +38,7 @@ from src.knowledge_base.persistence.v1.schema import (
 )
 
 
+@pytest.mark.asyncio
 class TestRealWorldKBV2System:
     """Comprehensive real-world tests for KBV2 system."""
 

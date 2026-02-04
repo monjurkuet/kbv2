@@ -1,5 +1,14 @@
 """Client interfaces for KBV2 LLM interactions."""
 
+import warnings
+
+warnings.warn(
+    "knowledge_base.clients is deprecated since v0.6.0. "
+    "Use knowledge_base.common.resilient_gateway for LLM operations.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from knowledge_base.clients.llm_client import (
     LLMClient,
     LLMClientConfig,

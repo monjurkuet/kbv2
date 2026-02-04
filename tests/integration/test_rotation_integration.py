@@ -31,6 +31,8 @@ async def test_resilient_gateway_rotates_on_429():
     )
 
     client = ResilientGatewayClient(config)
+    # Disable random model selection and mock model discovery
+    client._random_model_selection = False
     messages = [ChatMessage(role="user", content="Test prompt")]
 
     # Track which models were called
@@ -61,8 +63,15 @@ async def test_resilient_gateway_rotates_on_429():
             )
 
     # Patch the base client's chat_completion
-    with patch.object(
-        client._base_client, "chat_completion", side_effect=mock_chat_completion
+    with (
+        patch.object(
+            client._base_client, "chat_completion", side_effect=mock_chat_completion
+        ),
+        patch.object(
+            client._model_discovery,
+            "get_available_models",
+            return_value=["test-model-1", "test-model-2", "test-model-3"],
+        ),
     ):
         try:
             response = await client.chat_completion(messages)
@@ -99,9 +108,12 @@ async def test_resilient_gateway_retries_429_with_exponential_backoff():
         retry_jitter=False,
         retry_on_status_codes=[429],
         model_switching_enabled=False,  # Disable model switching to test retry only
+        continuous_rotation_enabled=False,  # Disable continuous rotation to enable retry logic
     )
 
     client = ResilientGatewayClient(config)
+    # Disable random model selection and mock model discovery
+    client._random_model_selection = False
     messages = [ChatMessage(role="user", content="Test prompt")]
 
     call_times = []
@@ -129,8 +141,13 @@ async def test_resilient_gateway_retries_429_with_exponential_backoff():
             usage={"prompt_tokens": 10, "completion_tokens": 5},
         )
 
-    with patch.object(
-        client._base_client, "chat_completion", side_effect=mock_chat_completion
+    with (
+        patch.object(
+            client._base_client, "chat_completion", side_effect=mock_chat_completion
+        ),
+        patch.object(
+            client._model_discovery, "get_available_models", return_value=["test-model"]
+        ),
     ):
         try:
             response = await client.chat_completion(messages)

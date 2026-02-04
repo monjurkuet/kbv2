@@ -44,6 +44,9 @@ from knowledge_base.ingestion.v1.gleaning_service import (
     GleaningService,
 )
 from knowledge_base.persistence.v1.graph_store import GraphStore
+from knowledge_base.orchestration.quality_assurance_service import (
+    QualityAssuranceService,
+)
 from sqlalchemy import select
 
 
@@ -574,4 +577,133 @@ class EntityPipelineService(BaseService):
 
         self._logger.info(
             f"Clustered {len(entities)} entities into {len(hierarchy.community_ids) if hierarchy else 0} communities"
+        )
+
+    async def extract(
+        self,
+        document: Document,
+        chunks: List[Chunk],
+        domain: str,
+        use_multi_agent: bool = True,
+        recommendation=None,
+    ) -> Tuple[List[Entity], List[Edge]]:
+        """Extract entities and relationships from a document.
+
+        Args:
+            document: The document to extract from
+            chunks: List of chunks
+            domain: Document domain
+            use_multi_agent: If True, try multi-agent first, fallback to gleaning
+            recommendation: Adaptive ingestion recommendation (optional)
+
+        Returns:
+            Tuple of (entities, edges)
+        """
+        entities, edges, quality_score, verifications = await self.extract_entities(
+            document=document,
+            chunks=chunks,
+            domain=domain,
+            use_multi_agent=use_multi_agent,
+            recommendation=recommendation,
+        )
+        return entities, edges
+
+    async def resolve_and_cluster(
+        self,
+        document: Document,
+        entities: List[Entity],
+        quality_assurance_service: QualityAssuranceService | None = None,
+    ) -> None:
+        """Resolve duplicate entities and cluster them into communities.
+
+        Args:
+            document: The document
+            entities: List of entities to process
+            quality_assurance_service: Optional QA service for routing to review
+        """
+        async with self._vector_store.get_session() as session:
+            resolutions = await self.resolve_entities(
+                document=document,
+                entities=entities,
+                session=session,
+            )
+
+            for resolution in resolutions:
+                if resolution.human_review_required:
+                    chunk_text = ""
+                    chunk_result = await session.execute(
+                        select(Chunk)
+                        .join(ChunkEntity, ChunkEntity.chunk_id == Chunk.id)
+                        .where(ChunkEntity.entity_id == resolution.entity_id)
+                        .limit(1)
+                    )
+                    chunk = chunk_result.scalar_one_or_none()
+                    if chunk:
+                        chunk_text = (
+                            str(chunk.text)
+                            if hasattr(chunk.text, "value")
+                            else chunk.text
+                        )
+
+                    priority = (
+                        3
+                        if resolution.confidence_score >= 0.9
+                        else (
+                            5
+                            if resolution.confidence_score >= 0.7
+                            else (7 if resolution.confidence_score >= 0.5 else 9)
+                        )
+                    )
+                    if quality_assurance_service:
+                        await quality_assurance_service.route_to_review(
+                            [
+                                {
+                                    "item_type": "entity_resolution",
+                                    "item_id": resolution.entity_id,
+                                    "reason": resolution.grounding_quote,
+                                    "priority": priority,
+                                    "metadata": {
+                                        "document_id": str(document.id),
+                                        "merged_entity_ids": [
+                                            str(eid)
+                                            for eid in resolution.merged_entity_ids
+                                        ],
+                                        "confidence_score": resolution.confidence_score,
+                                        "source_text": chunk_text,
+                                    },
+                                }
+                            ],
+                            session,
+                        )
+                else:
+                    await self.merge_entities(resolution, session)
+
+            doc_in_session = await session.get(Document, document.id)
+            if doc_in_session:
+                doc_in_session.status = "resolved"
+                await session.commit()
+
+        await self._cluster_and_update(document, entities)
+
+    async def _cluster_and_update(
+        self,
+        document: Document,
+        entities: List[Entity],
+    ) -> None:
+        """Cluster entities and update document status."""
+        async with self._vector_store.get_session() as session:
+            edge_result = await session.execute(
+                select(Edge)
+                .join(Entity, Edge.source_id == Entity.id)
+                .join(ChunkEntity, Entity.id == ChunkEntity.entity_id)
+                .join(Chunk, ChunkEntity.chunk_id == Chunk.id)
+                .where(Chunk.document_id == document.id)
+            )
+            edges = edge_result.scalars().all()
+
+        await self.cluster_entities(
+            document=document,
+            entities=entities,
+            edges=list(edges),
+            session=session,
         )

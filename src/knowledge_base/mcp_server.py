@@ -7,6 +7,7 @@ import json
 import time
 import logging
 from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,9 @@ class MCPRequest(BaseModel):
     params: Dict[str, Any] = Field(
         default_factory=dict, description="Parameters for the method"
     )
-    id: Optional[str | int] = Field(None, description="Unique identifier for the request")
+    id: Optional[str | int] = Field(
+        None, description="Unique identifier for the request"
+    )
 
 
 class MCPResponse(BaseModel):
@@ -105,8 +108,7 @@ class KBV2MCPProtocol(MCPProtocol):
     def __init__(self):
         super().__init__()
         self.orchestrator = IngestionOrchestrator(
-            progress_callback=self._send_progress_update,
-            log_broadcast=self.broadcast
+            progress_callback=self._send_progress_update, log_broadcast=self.broadcast
         )
         self.text_to_sql_agent = None
         self.vector_store = VectorStore()
@@ -432,7 +434,9 @@ class KBV2MCPProtocol(MCPProtocol):
             "progress": 0,
         }
 
-    async def _handle_deduplicate_entities(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_deduplicate_entities(
+        self, params: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Handle global entity deduplication request.
 
         Args:
@@ -445,15 +449,17 @@ class KBV2MCPProtocol(MCPProtocol):
         return result
 
 
-# Create FastAPI app and MCP protocol instance
-app = FastAPI(title="KBV2 MCP Server")
-kbv2_protocol = KBV2MCPProtocol()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the MCP server components on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown."""
     await kbv2_protocol.initialize()
+    yield
+    # Add shutdown logic if needed
+
+
+# Create FastAPI app and MCP protocol instance
+app = FastAPI(title="KBV2 MCP Server", lifespan=lifespan)
+kbv2_protocol = KBV2MCPProtocol()
 
 
 @app.websocket("/ws")
