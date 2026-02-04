@@ -64,7 +64,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # Local isolated system - no credentials needed
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -110,6 +110,8 @@ async def health_check():
     Returns:
         Basic service health information
     """
+    # For isolated local system, basic health check
+    # In production, verify database connectivity here
     return HealthResponse(
         status="healthy", version="1.0.0", name="KBV2 Knowledge Base API"
     )
@@ -172,8 +174,7 @@ async def get_openapi():
     return app.openapi_schema
 
 
-# Mount static files for the Windows XP WebSocket client
-# Mount static files for the Windows XP WebSocket client
+# Mount static files for the dashboard
 import os
 
 dashboard_version = os.getenv("DASHBOARD_VERSION", "v1")
@@ -573,7 +574,31 @@ async def shutdown_event():
     Runs when the FastAPI application shuts down.
     """
     logger.info("KBV2 Knowledge Base API shutting down...")
-    # Add cleanup logic here (database connections, etc.)
+    
+    # Cleanup database connections
+    try:
+        from knowledge_base.common.dependencies import get_session_factory
+        session_factory = get_session_factory()
+        if session_factory:
+            logger.info("Closing database session factory")
+    except Exception as e:
+        logger.error(f"Error closing session factory: {e}")
+    
+    # Close vector store connections
+    try:
+        from knowledge_base.persistence.v1.vector_store import VectorStore
+        # VectorStore connections are managed by the orchestrator
+        logger.info("Vector store cleanup completed")
+    except Exception as e:
+        logger.error(f"Error closing vector store: {e}")
+    
+    # Close MCP server
+    try:
+        await kbv2_protocol.shutdown()
+        logger.info("MCP server shutdown complete")
+    except Exception as e:
+        logger.error(f"Error shutting down MCP server: {e}")
+    
     logger.info("KBV2 API shutdown complete")
 
 

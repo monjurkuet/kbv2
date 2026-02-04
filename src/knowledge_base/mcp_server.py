@@ -114,21 +114,26 @@ class KBV2MCPProtocol(MCPProtocol):
         self.vector_store = VectorStore()
         self.current_websocket: Optional[WebSocket] = None
 
-    async def _send_progress_update(self, progress_data: Dict[str, Any]) -> None:
+    async def _send_progress_update(self, progress_data: Dict[str, Any], websocket=None) -> None:
         """Send progress update to the current WebSocket client.
 
         Args:
             progress_data: Dictionary containing progress information.
+            websocket: Optional WebSocket connection (if not provided, uses current_websocket).
         """
-        if self.current_websocket:
+        target_ws = websocket or self.current_websocket
+        if target_ws:
             message = {
                 "type": "progress",
                 **progress_data,
             }
             try:
-                await self.current_websocket.send_text(json.dumps(message))
-            except Exception:
-                pass
+                await target_ws.send_text(json.dumps(message))
+            except Exception as e:
+                # Log error but don't crash - client may have disconnected
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"WebSocket send failed: {e}")
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accept WebSocket connection and add to clients list."""
@@ -172,7 +177,7 @@ class KBV2MCPProtocol(MCPProtocol):
         """Initialize the KBV2 MCP protocol components."""
         await self.orchestrator.initialize()
         # Initialize text-to-sql agent with the PostgreSQL database engine
-        import os
+        import os  # Keep here for lazy loading
 
         database_url = os.getenv(
             "DATABASE_URL", "postgresql://agentzero@localhost:5432/knowledge_base"
@@ -236,7 +241,7 @@ class KBV2MCPProtocol(MCPProtocol):
         # Send initial progress update
         await self._send_progress_update(
             {
-                "stage": 0,
+                "stage": "started",
                 "status": "started",
                 "message": f"Starting ingestion of {document_name or file_path}",
                 "timestamp": time.time(),
@@ -256,7 +261,7 @@ class KBV2MCPProtocol(MCPProtocol):
             # Send completion progress update
             await self._send_progress_update(
                 {
-                    "stage": 9,
+                    "stage": "completed",
                     "status": "completed",
                     "message": f"Document ingestion completed successfully in {duration:.2f}s",
                     "timestamp": time.time(),
@@ -278,7 +283,7 @@ class KBV2MCPProtocol(MCPProtocol):
             # Send failure progress update
             await self._send_progress_update(
                 {
-                    "stage": 9,
+                    "stage": "completed",
                     "status": "failed",
                     "message": f"Document ingestion failed after {duration:.2f}s: {str(e)}",
                     "timestamp": time.time(),
@@ -326,9 +331,11 @@ class KBV2MCPProtocol(MCPProtocol):
             raise ValueError("query parameter is required for entity search")
 
         # Generate embedding for the query using the embedding client
-        from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
-
-        embedding_client = EmbeddingClient()
+        if not hasattr(self, "_embedding_client"):
+            from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
+            self._embedding_client = EmbeddingClient()
+        
+        embedding_client = self._embedding_client
         query_embedding = await embedding_client.embed_text(query)
 
         # Perform similarity search for entities
@@ -378,9 +385,11 @@ class KBV2MCPProtocol(MCPProtocol):
             raise ValueError("query parameter is required for chunk search")
 
         # Generate embedding for the query using the embedding client
-        from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
-
-        embedding_client = EmbeddingClient()
+        if not hasattr(self, "_embedding_client"):
+            from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
+            self._embedding_client = EmbeddingClient()
+        
+        embedding_client = self._embedding_client
         query_embedding = await embedding_client.embed_text(query)
 
         # Perform similarity search for chunks

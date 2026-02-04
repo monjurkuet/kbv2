@@ -136,7 +136,7 @@ class IngestionOrchestrator:
                 file_path=str(file_path),
             ):
                 await self._send_progress(
-                    {"step": 1, "status": "started", "message": "Processing document"}
+                    {"step": "started", "status": "started", "message": "Processing document"}
                 )
 
                 if not domain:
@@ -146,6 +146,8 @@ class IngestionOrchestrator:
                         vector_store=self._vector_store,
                     )
                     domain = await self._domain_service.detect_domain(doc_for_detection)
+                    if not domain:
+                        domain = "GENERAL"  # Default domain if detection fails
 
                 document = await self._document_service.process(
                     file_path=file_path,
@@ -155,7 +157,7 @@ class IngestionOrchestrator:
                 )
 
                 await self._send_progress(
-                    {"step": 2, "status": "completed", "message": "Document processed"}
+                    {"step": "document_processed", "status": "completed", "message": "Document processed"}
                 )
 
                 async with self._vector_store.get_session() as session:
@@ -173,7 +175,7 @@ class IngestionOrchestrator:
 
                 await self._send_progress(
                     {
-                        "step": 3,
+                        "step": "extracting",
                         "status": "started",
                         "message": f"Extracting: {recommendation.complexity.value}",
                     }
@@ -195,7 +197,7 @@ class IngestionOrchestrator:
 
                 await self._send_progress(
                     {
-                        "step": 4,
+                        "step": "resolving",
                         "status": "started",
                         "message": "Resolving and clustering",
                     }
@@ -209,7 +211,7 @@ class IngestionOrchestrator:
 
                 await self._send_progress(
                     {
-                        "step": 5,
+                        "step": "entity_complete",
                         "status": "completed",
                         "message": "Entity processing complete",
                     }
@@ -226,7 +228,10 @@ class IngestionOrchestrator:
                 return document
 
         except Exception as e:
-            doc_id = getattr(document, "id", None) if "document" in dir() else None
+            doc_id = None
+            # Check if document was defined in try block
+            if locals().get("document") is not None:
+                doc_id = getattr(document, "id", None)
             async with self._vector_store.get_session() as session:
                 if doc_id:
                     doc_to_update = await session.get(Document, doc_id)
@@ -250,7 +255,7 @@ class IngestionOrchestrator:
     ) -> Document:
         """Finalize document - update domain and status."""
         await self._send_progress(
-            {"step": 6, "status": "started", "message": "Finalizing document"}
+            {"step": "finalizing", "status": "started", "message": "Finalizing document"}
         )
 
         async with self._vector_store.get_session() as session:
@@ -285,7 +290,7 @@ class IngestionOrchestrator:
                     document = refreshed_doc
 
         await self._send_progress(
-            {"step": 6, "status": "completed", "message": "Document complete"}
+            {"step": "finalizing", "status": "completed", "message": "Document complete"}
         )
 
         return document
