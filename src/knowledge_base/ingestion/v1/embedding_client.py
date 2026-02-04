@@ -271,20 +271,17 @@ async def test_embedding():
         client = EmbeddingClient()
         test_text = "This is a test sentence for embedding."
 
-        print(f"Testing embedding with text: {test_text}")
-        print(f"Model: {client._config.embedding_model}")
-        print(f"Database dimensions: {client._dimensions}")
+        logger.info(f"Testing embedding with text: {test_text}")
+        logger.info(f"Model: {client._config.embedding_model}")
+        logger.info(f"Database dimensions: {client._dimensions}")
 
         embedding = await client.embed_text(test_text)
-        print(f"Success! Embedding vector length: {len(embedding)}")
-        print(f"Sample values: {embedding[:5]}")
+        logger.info(f"Success! Embedding vector length: {len(embedding)}")
+        logger.debug(f"Sample values: {embedding[:5]}")
 
         await client.close()
     except Exception as e:
-        print(f"Error during embedding test: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Error during embedding test: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Vector store with pgvector/HNSW."""
 
+import logging
 from typing import Any
 
 import asyncpg
@@ -10,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy import event, select
 
 from knowledge_base.persistence.v1.schema import Base, Entity, Chunk
+
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreConfig(BaseSettings):
@@ -80,7 +84,7 @@ class VectorStore:
         await self._setup_pgvector()
         await self._create_tables()
 
-        print("Vector store initialized with pgvector support")
+        logger.info("Vector store initialized with pgvector support")
 
     async def _create_tables(self) -> None:
         """Create database tables."""
@@ -99,10 +103,7 @@ class VectorStore:
             await register_vector(conn)
 
         self._pool = await asyncpg.create_pool(
-            dsn, 
-            min_size=2, 
-            max_size=10,
-            init=init_connection
+            dsn, min_size=2, max_size=10, init=init_connection
         )
 
         async with self._pool.acquire() as conn:
@@ -115,9 +116,9 @@ class VectorStore:
                 "WHERE table_name = 'chunks' AND column_name = 'embedding'"
             )
             if result:
-                print(f"Chunk embedding column type: {result[0]['data_type']}")
+                logger.debug(f"Chunk embedding column type: {result[0]['data_type']}")
             else:
-                print("Warning: embedding column not found in chunks table")
+                logger.warning("embedding column not found in chunks table")
 
     async def create_entity_embedding_index(self) -> None:
         """Create IVFFlat index for entity embeddings (HNSW limited to 2000 dims)."""

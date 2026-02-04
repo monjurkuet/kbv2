@@ -34,14 +34,10 @@ from knowledge_base.intelligence.v1.adaptive_ingestion_engine import (
 from knowledge_base.intelligence.v1.hallucination_detector import (
     HallucinationDetector,
     EntityVerification,
+    RiskLevel,
 )
 from knowledge_base.intelligence.v1.cross_domain_detector import (
     CrossDomainDetector,
-)
-from knowledge_base.intelligence.v1.hallucination_detector import (
-    HallucinationDetector,
-    EntityVerification,
-    RiskLevel,
 )
 from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
 from knowledge_base.ingestion.v1.gleaning_service import (
@@ -2044,8 +2040,8 @@ async def main() -> None:
     try:
         await orchestrator.initialize()
 
-        print("Knowledge Base Ingestion System Initialized")
-        print("Ready to process documents")
+        logger.info("Knowledge Base Ingestion System Initialized")
+        logger.info("Ready to process documents")
 
     finally:
         await orchestrator.close()
