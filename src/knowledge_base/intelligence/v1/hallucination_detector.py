@@ -216,7 +216,8 @@ Respond with JSON only:
         """Parse JSON response from the LLM gateway."""
         try:
             return json.loads(response_text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON from LLM response: {e}", exc_info=True)
             return {}
 
     def _calculate_risk_level(
