@@ -12,6 +12,14 @@ import numpy as np
 
 from knowledge_base.common.gateway import GatewayClient, EnhancedGateway
 from knowledge_base.common.resilient_gateway import ResilientGatewayClient
+from knowledge_base.config.constants import (
+    DOMAIN_CONFIDENCE_THRESHOLD,
+    ENTITY_SIMILARITY_THRESHOLD,
+    HALLUCINATION_THRESHOLD,
+    MIN_EXTRACTION_QUALITY_SCORE,
+    MIN_COMMUNITY_SIZE,
+    ROTATION_DELAY,
+)
 from knowledge_base.domain.detection import DomainDetector
 from knowledge_base.domain.domain_models import DomainConfig
 from knowledge_base.intelligence.v1.multi_agent_extractor import (
@@ -254,7 +262,7 @@ class IngestionOrchestrator:
 
         gateway_config = ResilientGatewayConfig(
             continuous_rotation_enabled=True,  # Enable continuous model rotation
-            rotation_delay=5.0,  # 5 second delay between rotation cycles
+            rotation_delay=ROTATION_DELAY,
         )
         self._gateway = ResilientGatewayClient(config=gateway_config)
         self._embedding_client = EmbeddingClient()
@@ -284,7 +292,7 @@ class IngestionOrchestrator:
         self._domain_detector = DomainDetector(
             llm_client=self._gateway,
             config=DomainConfig(
-                min_confidence=0.6,
+                min_confidence=DOMAIN_CONFIDENCE_THRESHOLD,
                 max_predictions=3,
                 enable_keyword_screening=True,
                 enable_llm_analysis=True,
@@ -499,7 +507,11 @@ class IngestionOrchestrator:
                             recommendation=recommendation,
                         )
 
-                        if quality_score and quality_score.overall_score >= 0.5:
+                        if (
+                            quality_score
+                            and quality_score.overall_score
+                            >= MIN_EXTRACTION_QUALITY_SCORE
+                        ):
                             multi_agent_success = True
 
                             # Deduplicate entities by URI
@@ -771,7 +783,7 @@ class IngestionOrchestrator:
                     similar = await self._vector_store.search_similar_entities(
                         embedding,
                         limit=5,
-                        similarity_threshold=0.85,
+                        similarity_threshold=ENTITY_SIMILARITY_THRESHOLD,
                     )
 
                     # Extract candidate IDs from similarity results
@@ -1177,7 +1189,7 @@ class IngestionOrchestrator:
                 similar = await self._vector_store.search_similar_entities(
                     embedding.tolist() if hasattr(embedding, "tolist") else embedding,
                     limit=5,
-                    similarity_threshold=0.85,
+                    similarity_threshold=ENTITY_SIMILARITY_THRESHOLD,
                 )
 
                 candidate_ids = []

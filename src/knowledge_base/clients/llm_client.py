@@ -13,6 +13,14 @@ import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from knowledge_base.config.constants import (
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TIMEOUT,
+    MAX_RETRIES,
+    RETRY_DELAY,
+    LLM_GATEWAY_URL,
+)
+
 
 class PromptingStrategy(str, Enum):
     """Available prompting strategies."""
@@ -30,14 +38,14 @@ class LLMClientConfig(BaseSettings):
         env_prefix="LLM_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    url: str = "http://localhost:8087/v1/"
+    url: str = LLM_GATEWAY_URL
     api_key: str = ""
-    model: str = "gemini-2.5-flash-lite"
+    model: str = DEFAULT_LLM_MODEL
     temperature: float = 0.0
     max_tokens: int = 4096
-    timeout: float = 120.0
-    max_retries: int = 3
-    retry_delay: float = 1.0
+    timeout: float = DEFAULT_LLM_TIMEOUT
+    max_retries: int = MAX_RETRIES
+    retry_delay: float = RETRY_DELAY
     retry_backoff: float = 2.0
 
 
@@ -697,9 +705,9 @@ async def create_llm_client(
         Configured LLM client.
     """
     config = LLMClientConfig(
-        url=url or "http://localhost:8087/v1/",
+        url=url or LLM_GATEWAY_URL,
         api_key=api_key or "",
-        model=model or "gemini-2.5-flash-lite",
+        model=model or DEFAULT_LLM_MODEL,
         temperature=temperature,
         max_tokens=max_tokens,
         max_retries=max_retries,

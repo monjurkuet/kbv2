@@ -9,6 +9,11 @@ import nltk
 from nltk.tokenize import sent_tokenize
 from pydantic import BaseModel, Field
 
+from knowledge_base.config.constants import (
+    SEMANTIC_CHUNK_SIZE,
+    OVERLAP_RATIO,
+)
+
 try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
@@ -46,9 +51,11 @@ class ChunkWithLinks(BaseModel):
 class SemanticChunkerConfig(BaseModel):
     """Configuration for semantic chunker."""
 
-    chunk_size: int = Field(default=1536, description="Target chunk size in tokens")
+    chunk_size: int = Field(
+        default=SEMANTIC_CHUNK_SIZE, description="Target chunk size in tokens"
+    )
     overlap_ratio: float = Field(
-        default=0.25, description="Overlap ratio between chunks (0.0 to 1.0)"
+        default=OVERLAP_RATIO, description="Overlap ratio between chunks (0.0 to 1.0)"
     )
     min_chunk_size: int = Field(default=256, description="Minimum chunk size in tokens")
     max_chunk_size: int = Field(
@@ -61,8 +68,8 @@ class SemanticChunker:
 
     def __init__(
         self,
-        chunk_size: int = 1536,
-        overlap_ratio: float = 0.25,
+        chunk_size: int = SEMANTIC_CHUNK_SIZE,
+        overlap_ratio: float = OVERLAP_RATIO,
         min_chunk_size: int = 256,
         max_chunk_size: int = 2048,
     ) -> None:

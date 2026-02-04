@@ -12,6 +12,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from knowledge_base.clients.llm_client import LLMClient, create_llm_client
+from knowledge_base.config.constants import (
+    DEFAULT_LLM_MODEL,
+    HALLUCINATION_THRESHOLD,
+    LLM_GATEWAY_URL,
+    DEFAULT_BATCH_SIZE,
+    MAX_RETRIES,
+)
 
 
 class VerificationStatus(str, Enum):
@@ -76,14 +83,17 @@ class HallucinationDetectorConfig(BaseModel):
     llm_client: LLMClient | None = Field(
         default=None, description="LLM client instance"
     )
-    url: str = Field(default="http://localhost:8087/v1/", description="LLM gateway URL")
-    model: str = Field(default="gemini-2.5-flash-lite", description="Model name")
+    url: str = Field(default=LLM_GATEWAY_URL, description="LLM gateway URL")
+    model: str = Field(default=DEFAULT_LLM_MODEL, description="Model name")
     temperature: float = Field(default=0.1, description="Temperature for verification")
     max_tokens: int = Field(default=1024, description="Max tokens for verification")
-    batch_size: int = Field(default=10, description="Batch size for batch verification")
+    batch_size: int = Field(
+        default=DEFAULT_BATCH_SIZE, description="Batch size for batch verification"
+    )
     confidence_threshold: float = Field(default=0.7, description="Confidence threshold")
     hallucination_threshold: float = Field(
-        default=0.3, description="Unsupported ratio threshold for hallucination"
+        default=HALLUCINATION_THRESHOLD,
+        description="Unsupported ratio threshold for hallucination",
     )
 
 

@@ -16,6 +16,12 @@ from knowledge_base.clients import (
     LLMClient,
     RotatingLLMClient,
 )
+from knowledge_base.config.constants import (
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TIMEOUT,
+    ROTATION_DELAY,
+    LLM_GATEWAY_URL,
+)
 from knowledge_base.clients.model_registry import (
     ModelRegistry,
     ModelRegistryConfig,
@@ -33,12 +39,12 @@ class GatewayConfig(BaseSettings):
         env_prefix="LLM_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    url: str = "http://localhost:8087/v1/"
+    url: str = LLM_GATEWAY_URL
     api_key: str = ""
-    model: str = "gemini-2.5-flash-lite"
+    model: str = DEFAULT_LLM_MODEL
     temperature: float = 0.0
     max_tokens: int = 4096
-    timeout: float = 120.0
+    timeout: float = DEFAULT_LLM_TIMEOUT
 
 
 class ChatMessage(BaseModel):
@@ -151,7 +157,9 @@ class GatewayClient:
 
         # Check if response contains error data (some gateways return errors as 200)
         if isinstance(response_data, dict) and (
-            "status" in response_data or "error" in response_data or "msg" in response_data
+            "status" in response_data
+            or "error" in response_data
+            or "msg" in response_data
         ):
             # Extract status code from error response
             status_code = 500
@@ -167,8 +175,12 @@ class GatewayClient:
                 if "code" in error_data:
                     status_code = error_data.get("code", 500)
 
-            error_msg = response_data.get("msg", response_data.get("error", "Unknown error"))
-            logger.warning(f"Model {request.model} returned error: {error_msg} (status: {status_code})")
+            error_msg = response_data.get(
+                "msg", response_data.get("error", "Unknown error")
+            )
+            logger.warning(
+                f"Model {request.model} returned error: {error_msg} (status: {status_code})"
+            )
 
             # Raise as HTTP error so it can be handled by retry/rotation logic
             raise httpx.HTTPStatusError(
@@ -378,7 +390,7 @@ class EnhancedGateway(GatewayClient):
 
                 await self._refresh_models()
 
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(ROTATION_DELAY)
 
                 try:
                     response = await rotating_client.chat_completion(**kwargs)

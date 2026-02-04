@@ -14,6 +14,13 @@ from tenacity import (
     retry_if_exception_type,
 )
 
+from knowledge_base.config.constants import (
+    EMBEDDING_URL,
+    DEFAULT_LLM_TIMEOUT,
+    MAX_RETRIES,
+    MAX_CONCURRENT_REQUESTS,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +30,7 @@ class EmbeddingConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
 
-    embedding_url: str = "http://localhost:11434"
+    embedding_url: str = EMBEDDING_URL
     embedding_model: str = "bge-m3"  # Use bge-m3 for multilingual support
     dimensions: int = 1024  # bge-m3 dimension size
 
@@ -35,7 +42,7 @@ class EmbeddingConfig(BaseSettings):
 
     @classmethod
     def for_model(
-        cls, model_name: str = "bge-m3", url: str = "http://localhost:11434"
+        cls, model_name: str = "bge-m3", url: str = EMBEDDING_URL
     ) -> "EmbeddingConfig":
         """Create config for bge-m3 model with 1024 dimensions."""
         # Always use bge-m3 with 1024 dimensions
@@ -100,7 +107,7 @@ class EmbeddingClient:
         """
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=120.0,
+                timeout=DEFAULT_LLM_TIMEOUT,
                 follow_redirects=True,
             )
         return self._client
@@ -177,7 +184,7 @@ class EmbeddingClient:
             return []
 
         # Use a semaphore to limit concurrency to avoid overwhelming Ollama
-        semaphore = asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS * 2)
 
         async def _embed_safe(text: str) -> list[float]:
             async with semaphore:
@@ -267,7 +274,7 @@ async def test_embedding():
         print(f"Testing embedding with text: {test_text}")
         print(f"Model: {client._config.embedding_model}")
         print(f"Database dimensions: {client._dimensions}")
-        
+
         embedding = await client.embed_text(test_text)
         print(f"Success! Embedding vector length: {len(embedding)}")
         print(f"Sample values: {embedding[:5]}")

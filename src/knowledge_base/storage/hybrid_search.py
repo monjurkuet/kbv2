@@ -18,6 +18,11 @@ from pydantic import BaseModel, Field
 
 from knowledge_base.persistence.v1.vector_store import VectorStore
 from knowledge_base.storage.bm25_index import BM25Index, IndexedDocument, SearchResult
+from knowledge_base.config.constants import (
+    VECTOR_SEARCH_WEIGHT,
+    GRAPH_SEARCH_WEIGHT,
+    DEFAULT_TOP_K_RESULTS,
+)
 
 
 class HybridSearchResult(BaseModel):
@@ -94,9 +99,9 @@ class HybridSearchEngine:
     async def search(
         self,
         query: str,
-        vector_weight: float = 0.5,
-        bm25_weight: float = 0.5,
-        top_k: int = 10,
+        vector_weight: float = VECTOR_SEARCH_WEIGHT,
+        bm25_weight: float = GRAPH_SEARCH_WEIGHT,
+        top_k: int = DEFAULT_TOP_K_RESULTS,
         filters: Optional[Dict] = None,
         domain: Optional[str] = None,
         query_embedding: Optional[List[float]] = None,
@@ -374,9 +379,9 @@ class HybridSearchEngine:
         self,
         query: str,
         initial_top_k: int = 50,
-        final_top_k: int = 10,
-        vector_weight: float = 0.5,
-        bm25_weight: float = 0.5,
+        final_top_k: int = DEFAULT_TOP_K_RESULTS,
+        vector_weight: float = VECTOR_SEARCH_WEIGHT,
+        bm25_weight: float = GRAPH_SEARCH_WEIGHT,
         filters: Optional[Dict] = None,
         domain: Optional[str] = None,
         query_embedding: Optional[List[float]] = None,
@@ -484,6 +489,6 @@ class HybridSearchEngine:
 
         return {
             "bm25_index": bm25_stats,
-            "vector_weight": 0.5,
-            "bm25_weight": 0.5,
+            "vector_weight": VECTOR_SEARCH_WEIGHT,
+            "bm25_weight": GRAPH_SEARCH_WEIGHT,
         }

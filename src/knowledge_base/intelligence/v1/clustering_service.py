@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_base.persistence.v1.schema import Community, Edge, Entity
+from knowledge_base.config.constants import (
+    DEFAULT_CLUSTER_RESOLUTION,
+    MIN_COMMUNITY_SIZE,
+)
 
 
 class ClusteringConfig(BaseSettings):
@@ -16,10 +20,10 @@ class ClusteringConfig(BaseSettings):
 
     model_config = SettingsConfigDict()
 
-    resolution_macro: float = 0.8
+    resolution_macro: float = DEFAULT_CLUSTER_RESOLUTION
     resolution_micro: float = 1.2
     iterations: int = 10
-    min_community_size: int = 3
+    min_community_size: int = MIN_COMMUNITY_SIZE
 
 
 class ClusteringResult(BaseModel):
