@@ -63,6 +63,9 @@ from knowledge_base.orchestration.document_pipeline_service import (
 from knowledge_base.orchestration.entity_pipeline_service import (
     EntityPipelineService,
 )
+from knowledge_base.orchestration.quality_assurance_service import (
+    QualityAssuranceService,
+)
 from knowledge_base.persistence.v1.schema import (
     Chunk,
     Community,
@@ -121,6 +124,7 @@ class IngestionOrchestrator:
         self._adaptive_engine: AdaptiveIngestionEngine | None = None
         self._document_service: DocumentPipelineService | None = None
         self._entity_pipeline_service: EntityPipelineService | None = None
+        self._quality_assurance_service: QualityAssuranceService | None = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -191,6 +195,15 @@ class IngestionOrchestrator:
             clustering_service=self._clustering_service,
             gleaning_service=self._gleaning_service,
             hallucination_detector=self._hallucination_detector,
+        )
+
+        # Initialize quality assurance service
+        self._quality_assurance_service = QualityAssuranceService()
+        await self._quality_assurance_service.initialize()
+        self._quality_assurance_service.set_validators(
+            domain_schema_validator=None,
+            hallucination_detector=self._hallucination_detector,
+            community_summarizer=self._synthesis_agent,
         )
 
         logger.info("IngestionOrchestrator initialized successfully")
@@ -380,12 +393,39 @@ class IngestionOrchestrator:
 
                 # Route hallucinated entities to review
                 if verifications:
+                    review_items = []
                     for verification in verifications:
                         if verification.is_hallucinated or verification.risk_level in (
                             RiskLevel.HIGH,
                             RiskLevel.CRITICAL,
                         ):
-                            await self._route_to_review([verification], document, "")
+                            priority = (
+                                9
+                                if verification.risk_level == RiskLevel.CRITICAL
+                                else 7
+                            )
+                            review_items.append(
+                                {
+                                    "item_type": "entity_verification",
+                                    "item_id": verification.entity_id,
+                                    "reason": ", ".join(
+                                        verification.hallucination_reasons
+                                    ),
+                                    "priority": priority,
+                                    "metadata": {
+                                        "document_id": str(document.id),
+                                        "entity_name": verification.entity_name,
+                                        "entity_type": verification.entity_type,
+                                        "risk_level": verification.risk_level.value,
+                                        "unsupported_count": verification.unsupported_count,
+                                        "total_attributes": verification.total_attributes,
+                                    },
+                                }
+                            )
+                    if review_items:
+                        await self._quality_assurance_service.route_to_review(
+                            review_items, session
+                        )
 
                 # Detect cross-domain relationships
                 if self._cross_domain_detector:
@@ -520,13 +560,34 @@ class IngestionOrchestrator:
                                 else chunk.text
                             )
 
-                        await self._add_to_review_queue(
-                            document.id,
-                            resolution.entity_id,
-                            resolution.merged_entity_ids,
-                            resolution.confidence_score,
-                            resolution.grounding_quote,
-                            chunk_text,
+                        priority = (
+                            3
+                            if resolution.confidence_score >= 0.9
+                            else (
+                                5
+                                if resolution.confidence_score >= 0.7
+                                else (7 if resolution.confidence_score >= 0.5 else 9)
+                            )
+                        )
+                        await self._quality_assurance_service.route_to_review(
+                            [
+                                {
+                                    "item_type": "entity_resolution",
+                                    "item_id": resolution.entity_id,
+                                    "reason": resolution.grounding_quote,
+                                    "priority": priority,
+                                    "metadata": {
+                                        "document_id": str(document.id),
+                                        "merged_entity_ids": [
+                                            str(eid)
+                                            for eid in resolution.merged_entity_ids
+                                        ],
+                                        "confidence_score": resolution.confidence_score,
+                                        "source_text": chunk_text,
+                                    },
+                                }
+                            ],
+                            session,
                         )
                     else:
                         await self._entity_pipeline_service.merge_entities(
@@ -825,13 +886,35 @@ class IngestionOrchestrator:
 
                     if resolution.merged_entity_ids:
                         if resolution.human_review_required:
-                            await self._add_to_review_queue(
-                                None,
-                                entity.id,
-                                resolution.merged_entity_ids,
-                                resolution.confidence_score,
-                                resolution.grounding_quote,
-                                chunk_text,
+                            priority = (
+                                3
+                                if resolution.confidence_score >= 0.9
+                                else (
+                                    5
+                                    if resolution.confidence_score >= 0.7
+                                    else (
+                                        7 if resolution.confidence_score >= 0.5 else 9
+                                    )
+                                )
+                            )
+                            await self._quality_assurance_service.route_to_review(
+                                [
+                                    {
+                                        "item_type": "entity_resolution",
+                                        "item_id": entity.id,
+                                        "reason": resolution.grounding_quote,
+                                        "priority": priority,
+                                        "metadata": {
+                                            "merged_entity_ids": [
+                                                str(eid)
+                                                for eid in resolution.merged_entity_ids
+                                            ],
+                                            "confidence_score": resolution.confidence_score,
+                                            "source_text": chunk_text,
+                                        },
+                                    }
+                                ],
+                                session,
                             )
                             review_count += 1
                         else:
@@ -843,148 +926,6 @@ class IngestionOrchestrator:
                 "merged_entities": merged_count,
                 "pending_review": review_count,
             }
-
-    async def _add_to_review_queue(
-        self,
-        document_id: UUID,
-        entity_id: UUID,
-        merged_entity_ids: list[UUID],
-        confidence_score: float,
-        grounding_quote: str,
-        source_text: str,
-    ) -> None:
-        """Add entity resolution to review queue.
-
-        Args:
-            document_id: Source document ID.
-            entity_id: Target entity ID.
-            merged_entity_ids: IDs of entities to be merged.
-            confidence_score: Confidence in the resolution decision.
-            grounding_quote: Quote supporting the resolution.
-            source_text: Original source text.
-        """
-        if not merged_entity_ids:
-            return
-
-        if confidence_score >= 0.9:
-            priority = 3
-        elif confidence_score >= 0.7:
-            priority = 5
-        elif confidence_score >= 0.5:
-            priority = 7
-        else:
-            priority = 9
-
-        review_item = ReviewQueue(
-            id=uuid4(),
-            item_type="entity_resolution",
-            entity_id=entity_id,
-            document_id=document_id,
-            merged_entity_ids=merged_entity_ids,
-            confidence_score=confidence_score,
-            grounding_quote=grounding_quote,
-            source_text=source_text,
-            status=ReviewStatus.PENDING,
-            priority=priority,
-        )
-
-        async with self._vector_store.get_session() as session:
-            session.add(review_item)
-            await session.commit()
-
-        self._observability.log_metric(
-            "review_queue_items_added",
-            1,
-            document_id=str(document_id),
-            priority=priority,
-        )
-
-    async def _update_document(self, document: Document) -> None:
-        """Update document in database.
-
-        Args:
-            document: Document to update.
-        """
-        async with self._vector_store.get_session() as session:
-            await session.merge(document)
-            await session.commit()
-
-    def _get_mime_type(self, path: Path) -> str:
-        """Get MIME type for file.
-
-        Args:
-            path: File path.
-
-        Returns:
-            MIME type string.
-        """
-        import mimetypes
-
-        mime_type, _ = mimetypes.guess_type(str(path))
-        return mime_type or "application/octet-stream"
-
-    async def _emit_progress(
-        self, stage: int, status: str, message: str, **kwargs
-    ) -> None:
-        """Emit progress update.
-
-        Args:
-            stage: Pipeline stage number (1-9).
-            status: Status of the stage (started, completed, failed).
-            message: Human-readable message.
-            **kwargs: Additional context data.
-        """
-        progress_data = {
-            "stage": stage,
-            "status": status,
-            "message": message,
-            "total_stages": 9,
-            **kwargs,
-        }
-        await self._send_progress(progress_data)
-
-    async def _route_to_review(
-        self,
-        verifications: List[EntityVerification],
-        document: Document,
-        source_text: str,
-    ) -> None:
-        """Route low-quality entities to review queue."""
-        for verification in verifications:
-            if verification.is_hallucinated or verification.risk_level in (
-                RiskLevel.HIGH,
-                RiskLevel.CRITICAL,
-            ):
-                priority = 9 if verification.risk_level == RiskLevel.CRITICAL else 7
-
-                review_item = ReviewQueue(
-                    id=uuid4(),
-                    item_type="entity_verification",
-                    document_id=document.id,
-                    confidence_score=verification.overall_confidence,
-                    grounding_quote=", ".join(verification.hallucination_reasons),
-                    source_text=source_text,
-                    status=ReviewStatus.PENDING,
-                    priority=priority,
-                    metadata={
-                        "entity_name": verification.entity_name,
-                        "entity_type": verification.entity_type,
-                        "risk_level": verification.risk_level.value,
-                        "unsupported_count": verification.unsupported_count,
-                        "total_attributes": verification.total_attributes,
-                    },
-                )
-
-                async with self._vector_store.get_session() as session:
-                    session.add(review_item)
-                    await session.commit()
-
-                self._observability.log_metric(
-                    "review_queue_items_added",
-                    1,
-                    document_id=str(document.id),
-                    priority=priority,
-                )
 
     async def process_document(
         self,
