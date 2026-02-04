@@ -47,6 +47,9 @@ class ExtractedEntity(BaseModel):
         default_factory=dict, description="Entity properties"
     )
     confidence: float = Field(default=1.0, description="Extraction confidence")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Entity metadata"
+    )
 
 
 class ExtractedEdge(BaseModel):
@@ -222,6 +225,33 @@ class GleaningService:
             and len(previous_results) >= 1
             and self.calculate_new_information_gain(previous_results[-1], result) < 0.1
         )
+
+    def _handle_long_tail_distribution(
+        self,
+        extracted_entities: List[ExtractedEntity],
+        pass_type: str,
+    ) -> List[ExtractedEntity]:
+        """Handle long-tail entities with low confidence.
+
+        Args:
+            extracted_entities: List of extracted entities.
+            pass_type: Type of pass (e.g., "table", "image", "figure").
+
+        Returns:
+            List of entities with long-tail metadata added.
+        """
+        if len(extracted_entities) <= 20:
+            return extracted_entities
+
+        long_tail = sorted(extracted_entities, key=lambda x: x.confidence)[-5:]
+        remaining = [e for e in extracted_entities if e not in long_tail]
+
+        for entity in long_tail:
+            entity.metadata = entity.metadata or {}
+            entity.metadata["long_tail"] = True
+            entity.metadata["pass_type"] = pass_type
+
+        return remaining + long_tail
 
     def should_continue_extraction(
         self,
@@ -853,6 +883,8 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
         information_density = data.get("information_density", 0.5)
         information_density = max(0.0, min(1.0, information_density))
 
+        entities = self._handle_long_tail_distribution(entities, "general")
+
         return ExtractionResult(
             entities=entities,
             edges=edges,
@@ -917,8 +949,12 @@ Entities: {", ".join(e.name for e in previous_result.entities)}
 
         self._analyze_relation_distribution(list(edges.values()))
 
+        merged_entities = self._handle_long_tail_distribution(
+            list(entities.values()), "merged"
+        )
+
         return ExtractionResult(
-            entities=list(entities.values()),
+            entities=merged_entities,
             edges=list(edges.values()),
             temporal_claims=unique_temporal_claims,
             information_density=final_density,
