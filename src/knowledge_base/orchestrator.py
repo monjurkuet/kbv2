@@ -60,6 +60,7 @@ from knowledge_base.intelligence.v1.entity_typing_service import (
 )
 from knowledge_base.observability import Observability
 from knowledge_base.intelligence.v1.domain_schema_service import SchemaRegistry
+from knowledge_base.orchestration.domain_detection_service import DomainDetectionService
 from knowledge_base.persistence.v1.schema import (
     Chunk,
     Community,
@@ -80,139 +81,6 @@ logger = logging.getLogger(__name__)
 
 class IngestionOrchestrator:
     """ReAct loop orchestrator for knowledge ingestion."""
-
-    DOMAIN_KEYWORDS = {
-        "technology": [
-            "software",
-            "code",
-            "api",
-            "algorithm",
-            "database",
-            "server",
-            "cloud",
-            "programming",
-            "developer",
-            "framework",
-            "library",
-            "function",
-            "class",
-            "module",
-            "interface",
-            "protocol",
-            "network",
-            "system",
-            "data",
-            "machine learning",
-            "ai",
-            "neural",
-            "model",
-            "training",
-            "inference",
-        ],
-        "healthcare": [
-            "patient",
-            "doctor",
-            "hospital",
-            "clinical",
-            "diagnosis",
-            "treatment",
-            "therapy",
-            "medication",
-            "medical",
-            "health",
-            "disease",
-            "symptom",
-            "prescription",
-            "surgery",
-            "procedure",
-            "lab",
-            "test",
-            "blood",
-            "pressure",
-            "heart",
-            "cancer",
-            "diabetes",
-            "mental",
-        ],
-        "finance": [
-            "finance",
-            "bank",
-            "investment",
-            "stock",
-            "market",
-            "trading",
-            "portfolio",
-            "asset",
-            "liability",
-            "revenue",
-            "profit",
-            "loss",
-            "equity",
-            "bond",
-            "loan",
-            "credit",
-            "debt",
-            "cryptocurrency",
-            "bitcoin",
-            "dollar",
-            "euro",
-            "yen",
-            "forex",
-            "capital",
-            "income",
-            "expense",
-            "budget",
-            "accounting",
-        ],
-        "legal": [
-            "law",
-            "legal",
-            "contract",
-            "agreement",
-            "court",
-            "judge",
-            "attorney",
-            "lawyer",
-            "litigation",
-            "lawsuit",
-            "regulation",
-            "compliance",
-            "policy",
-            "clause",
-            "term",
-            "breach",
-            "liability",
-            "damages",
-            "settlement",
-            "verdict",
-            "testimony",
-            "evidence",
-        ],
-        "science": [
-            "research",
-            "experiment",
-            "hypothesis",
-            "theory",
-            "analysis",
-            "data",
-            "study",
-            "paper",
-            "publication",
-            "laboratory",
-            "scientist",
-            "physics",
-            "chemistry",
-            "biology",
-            "molecule",
-            "cell",
-            "gene",
-            "protein",
-            "atom",
-            "energy",
-            "force",
-            "quantum",
-        ],
-    }
 
     def __init__(
         self,
@@ -248,6 +116,7 @@ class IngestionOrchestrator:
         self._entity_typer: EntityTyper | None = None
         self._schema_registry: SchemaRegistry | None = None
         self._domain_detector: DomainDetector | None = None
+        self._domain_service: DomainDetectionService | None = None
         self._adaptive_engine: AdaptiveIngestionEngine | None = None
 
     async def initialize(self) -> None:
@@ -295,6 +164,8 @@ class IngestionOrchestrator:
                 keyword_threshold=0.3,
             ),
         )
+        self._domain_service = DomainDetectionService()
+        await self._domain_service.initialize()
 
         # Initialize adaptive ingestion engine for intelligent pipeline optimization
         self._adaptive_engine = AdaptiveIngestionEngine(gateway=self._gateway)
@@ -312,94 +183,6 @@ class IngestionOrchestrator:
                 await self._progress_callback(progress_data)
             else:
                 self._progress_callback(progress_data)
-
-    def _calculate_domain_scores(self, text: str) -> dict[str, float]:
-        """Calculate domain scores based on keyword frequency."""
-        if not text or not text.strip():
-            return {
-                "technology": 0.0,
-                "healthcare": 0.0,
-                "finance": 0.0,
-                "legal": 0.0,
-                "science": 0.0,
-                "general": 0.0,
-            }
-
-        text_lower = text.lower()
-        scores = {
-            "technology": 0.0,
-            "healthcare": 0.0,
-            "finance": 0.0,
-            "legal": 0.0,
-            "science": 0.0,
-            "general": 0.0,
-        }
-
-        for domain, keywords in self.DOMAIN_KEYWORDS.items():
-            for keyword in keywords:
-                count = text_lower.count(keyword)
-                weight = len(keyword) / 10
-                scores[domain] += count * weight
-
-        total = sum(scores.values())
-        if total > 0:
-            for domain in scores:
-                scores[domain] /= total
-
-        return scores
-
-    async def _determine_domain(
-        self, document: Document, content_text: str | None = None
-    ) -> str:
-        """Determine domain for a document based on its content or metadata.
-
-        Uses the DomainDetector for advanced domain detection with keyword
-        screening and LLM analysis when available.
-
-        Args:
-            document: The document to determine domain for.
-            content_text: Optional document content text for content-based classification.
-
-        Returns:
-            Domain string (e.g., "TECHNOLOGY", "FINANCIAL", "MEDICAL", "LEGAL",
-            "SCIENTIFIC", "GENERAL").
-        """
-        if document.doc_metadata and "domain" in document.doc_metadata:
-            return str(document.doc_metadata["domain"]).upper()
-
-            try:
-                result = await self._domain_detector.detect_domain(content_text)
-                if result.primary_domain:
-                    return result.primary_domain
-            except Exception:
-                pass
-
-        if content_text:
-            scores = self._calculate_domain_scores(content_text)
-            best_domain = max(scores, key=lambda k: scores.get(k, 0.0))
-            if scores.get(best_domain, 0) >= 0.1:
-                return best_domain.upper()
-
-        name_lower = document.name.lower()
-        if any(term in name_lower for term in ["tech", "software", "code", "api"]):
-            return "TECHNOLOGY"
-        elif any(
-            term in name_lower for term in ["health", "medical", "patient", "doctor"]
-        ):
-            return "MEDICAL"
-        elif any(
-            term in name_lower for term in ["finance", "bank", "money", "investment"]
-        ):
-            return "FINANCIAL"
-        elif any(term in name_lower for term in ["legal", "law", "contract", "court"]):
-            return "LEGAL"
-        elif any(
-            term in name_lower
-            for term in ["research", "science", "study", "experiment"]
-        ):
-            return "SCIENTIFIC"
-        else:
-            return "GENERAL"
 
     async def _partition_document(
         self,
@@ -499,7 +282,7 @@ class IngestionOrchestrator:
                         ) = await self._extract_entities_multi_agent(
                             document=document,
                             content_text="",
-                            domain=await self._determine_domain(document),
+                            domain=await self._domain_service.detect_domain(document),
                             recommendation=recommendation,
                         )
 
@@ -701,7 +484,9 @@ class IngestionOrchestrator:
                             for e in existing_edges
                         ]
 
-                        document_domain = await self._determine_domain(document)
+                        document_domain = await self._domain_service.detect_domain(
+                            document
+                        )
                         cross_domain_edges = await self._cross_domain_detector.detect_cross_domain_relationships(
                             entities=entities_data,
                             edges=edges_data,
@@ -1837,7 +1622,7 @@ class IngestionOrchestrator:
                 final_domain = (
                     domain
                     if domain is not None
-                    else await self._determine_domain(document)
+                    else await self._domain_service.detect_domain(document)
                 )
                 async with self._vector_store.get_session() as session:
                     doc_to_update = await session.get(Document, document.id)
