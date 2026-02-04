@@ -544,7 +544,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
 
         Returns:
             List of communities at the specified level.
-        }
+        """
         level_map = {
             HierarchyLevel.MACRO: summary.macro_communities,
             HierarchyLevel.MESO: summary.meso_communities,
