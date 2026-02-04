@@ -361,35 +361,35 @@ class SemanticChunker:
                 current_token_count + sentence_tokens > self._chunk_size
                 and current_chunk_text
             ):
-                num_overlap_tokens = 0
-                for sent in reversed(overlap_sentences):
-                    sent_tokens = self._count_tokens(sent)
-                    if num_overlap_tokens + sent_tokens <= self._overlap_tokens:
-                        num_overlap_tokens += sent_tokens
-                    else:
+                overlap_size = self._overlap_tokens * 4
+
+                overlap_for_next = []
+                overlap_size_calc = overlap_size
+
+                for overlap_candidate in reversed(overlap_sentences):
+                    if overlap_size_calc <= 0:
                         break
-                overlap_text = ""
-                for sent in overlap_sentences:
-                    sent_tokens = self._count_tokens(sent)
-                    if num_overlap_tokens >= sent_tokens:
-                        overlap_text += sent + " "
-                        num_overlap_tokens -= sent_tokens
+                    overlap_for_next.insert(0, overlap_candidate)
+                    overlap_size_calc -= len(overlap_candidate)
+
+                overlap_sentences = overlap_for_next.copy()
 
                 chunks.append(
                     Chunk(
                         id=self._generate_chunk_id(chunks, chunk_index),
-                        text=(overlap_text + current_chunk_text).strip(),
-                        token_count=self._count_tokens(
-                            (overlap_text + current_chunk_text).strip()
-                        ),
+                        text=current_chunk_text.strip(),
+                        token_count=current_token_count,
                         chunk_index=chunk_index,
                         page_number=None,
                     )
                 )
                 chunk_index += 1
-                overlap_sentences = []
+
                 current_chunk_text = ""
                 current_token_count = 0
+                for overlap_sent in overlap_sentences:
+                    current_chunk_text += overlap_sent + " "
+                    current_token_count += self._count_tokens(overlap_sent)
 
             if current_token_count + sentence_tokens <= self._max_chunk_size:
                 current_chunk_text += sentence + " "
