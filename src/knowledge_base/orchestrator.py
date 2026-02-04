@@ -61,6 +61,9 @@ from knowledge_base.intelligence.v1.entity_typing_service import (
 from knowledge_base.observability import Observability
 from knowledge_base.intelligence.v1.domain_schema_service import SchemaRegistry
 from knowledge_base.orchestration.domain_detection_service import DomainDetectionService
+from knowledge_base.orchestration.document_pipeline_service import (
+    DocumentPipelineService,
+)
 from knowledge_base.persistence.v1.schema import (
     Chunk,
     Community,
@@ -118,6 +121,7 @@ class IngestionOrchestrator:
         self._domain_detector: DomainDetector | None = None
         self._domain_service: DomainDetectionService | None = None
         self._adaptive_engine: AdaptiveIngestionEngine | None = None
+        self._document_service: DocumentPipelineService | None = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -170,6 +174,10 @@ class IngestionOrchestrator:
         # Initialize adaptive ingestion engine for intelligent pipeline optimization
         self._adaptive_engine = AdaptiveIngestionEngine(gateway=self._gateway)
 
+        # Initialize document pipeline service
+        self._document_service = DocumentPipelineService()
+        await self._document_service.initialize()
+
         logger.info("IngestionOrchestrator initialized successfully")
 
     async def _send_progress(self, progress_data: dict[str, Any]) -> None:
@@ -203,20 +211,24 @@ class IngestionOrchestrator:
         async with obs.trace_context(
             "partition_document", document_id=str(document.id)
         ):
-            from knowledge_base.ingestion.v1.partitioning_service import (
-                PartitioningService,
-            )
+            # Use DocumentPipelineService to partition the document
+            from knowledge_base.partitioning.semantic_chunker import SemanticChunker
 
-            partitioning_service = PartitioningService()
-            chunks = await partitioning_service.partition_and_chunk(file_path)
+            # Read the file content
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Use the chunker from DocumentPipelineService
+            chunker = self._document_service._chunker
+            chunks = chunker.partition(content)
 
             async with self._vector_store.get_session() as session:
-                for idx, chunk_data in enumerate(chunks):
+                for chunk_data in chunks:
                     chunk = Chunk(
                         id=uuid4(),
                         document_id=document.id,
                         text=chunk_data.text,
-                        chunk_index=idx,
+                        chunk_index=chunk_data.chunk_index,
                         page_number=chunk_data.page_number,
                         token_count=chunk_data.token_count,
                         chunk_metadata=chunk_data.metadata,
@@ -1774,8 +1786,10 @@ class IngestionOrchestrator:
                 )
                 entity_texts.append(f"{entity_name}. {entity_desc}")
 
+            # Use DocumentPipelineService's embedding client for chunk embeddings
             if chunk_texts:
-                chunk_embeddings = await self._embedding_client.embed_batch(chunk_texts)
+                embedding_client = self._document_service._embedding_client
+                chunk_embeddings = await embedding_client.embed_batch(chunk_texts)
                 chunk_updates = [
                     (str(chunk.id), embedding)
                     for chunk, embedding in zip(chunks, chunk_embeddings)
@@ -1783,10 +1797,10 @@ class IngestionOrchestrator:
                 ]
                 await self._vector_store.update_chunk_embeddings_batch(chunk_updates)
 
+            # Use DocumentPipelineService's embedding client for entity embeddings
             if entity_texts:
-                entity_embeddings = await self._embedding_client.embed_batch(
-                    entity_texts
-                )
+                embedding_client = self._document_service._embedding_client
+                entity_embeddings = await embedding_client.embed_batch(entity_texts)
                 entity_updates = [
                     (str(entity.id), embedding)
                     for entity, embedding in zip(entities, entity_embeddings)
