@@ -458,26 +458,3 @@ class KBV2MCPProtocol(MCPProtocol):
         return result
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup/shutdown."""
-    await kbv2_protocol.initialize()
-    yield
-    # Add shutdown logic if needed
-
-
-# Create FastAPI app and MCP protocol instance
-app = FastAPI(title="KBV2 MCP Server", lifespan=lifespan)
-kbv2_protocol = KBV2MCPProtocol()
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for MCP protocol."""
-    await kbv2_protocol.connect(websocket)
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await kbv2_protocol.handle_message(websocket, message)
-    except WebSocketDisconnect:
-        kbv2_protocol.disconnect(websocket)

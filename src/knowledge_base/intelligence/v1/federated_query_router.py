@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 import math
 from typing import Any, Optional
-from pydantic import BaseModel
 from knowledge_base.intelligence.v1.hybrid_retriever import (
     HybridEntityRetriever,
     HybridRetrievalResult,
@@ -236,7 +235,6 @@ class DomainDetector:
             List of domain matches sorted by confidence.
         """
         query_lower = query.lower()
-        query_words = set(query_lower.split())
 
         matches: list[DomainMatch] = []
 
@@ -283,9 +281,7 @@ class DomainDetector:
 
         if self._embedding_client is None:
             return [
-                match
-                for match in keyword_matches
-                if match.confidence >= min_confidence
+                match for match in keyword_matches if match.confidence >= min_confidence
             ][:max_domains]
 
         query_embedding = await self._embedding_client.embed_text(query)
@@ -673,7 +669,7 @@ class FederatedQueryRouter:
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
 
         for outcome in outcomes:
-            if isinstance(outcome, Exception):
+            if isinstance(outcome, (Exception, BaseException)):
                 continue
             domain, results, error = outcome
             if error:

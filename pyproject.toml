@@ -49,6 +49,11 @@ dev = [
     "types-requests>=2.31.0",
 ]
 
+[tool.mypy]
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unreachable = true
+
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"

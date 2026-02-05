@@ -326,7 +326,7 @@ class SchemaRegistry:
         query = select(DomainSchema)
 
         if active_only:
-            query = query.where(DomainSchema.is_active == "Y")
+            query = query.where(DomainSchema.is_active == True)
 
         if level:
             query = query.where(DomainSchema.domain_level == level.value)
@@ -557,8 +557,8 @@ class SchemaRegistry:
             description=db_schema.description,
             parent_domain_id=db_schema.parent_domain_id,
             parent_domain_name=parent_domain_name,
-            domain_level=DomainLevel(db_schema.domain_level),
-            inheritance_type=InheritanceType(db_schema.inheritance_type),
+            domain_level=DomainLevel(db_schema.domain_level.lower()),
+            inheritance_type=InheritanceType(db_schema.inheritance_type.lower()),
             entity_types=entity_types,
             validation_mode=SchemaValidationMode(db_schema.validation_mode),
             is_active=db_schema.is_active == "Y",

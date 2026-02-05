@@ -42,7 +42,14 @@ class ProgressUpdate(BaseModel):
     """Represents a progress update from the server."""
 
     type: str = Field(..., description="Message type (should be 'progress')")
-    stage: Union[int, float] = Field(..., description="Current stage number (0-9)")
+    stage: Optional[Union[int, float, str]] = Field(
+        None,
+        description="Current stage number (0-9) or stage name (e.g., 'started', 'completed')",
+    )
+    step: Optional[str] = Field(
+        None,
+        description="Step name (alternative to stage, e.g., 'extracting', 'resolving')",
+    )
     status: str = Field(..., description="Status of current stage")
     message: str = Field(..., description="Progress message")
     timestamp: Optional[float] = Field(None, description="Unix timestamp")
@@ -195,11 +202,14 @@ class KBV2WebSocketClient:
 
             if message_type == "progress":
                 logger.info(
-                    f"Received progress update: stage={data.get('stage')}, status={data.get('status')}"
+                    f"Received progress update: stage={data.get('stage')}, step={data.get('step')}, status={data.get('status')}"
                 )
-                progress_update = ProgressUpdate(**data)
-                if self.progress_callback:
-                    self.progress_callback(progress_update)
+                try:
+                    progress_update = ProgressUpdate(**data)
+                    if self.progress_callback:
+                        self.progress_callback(progress_update)
+                except Exception as e:
+                    logger.error(f"Error parsing progress update: {e}", exc_info=True)
             elif message_type == "extraction_log":
                 logger.info(
                     f"Received extraction log: event_type={data.get('event_type')}"

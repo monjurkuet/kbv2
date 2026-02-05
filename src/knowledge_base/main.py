@@ -60,6 +60,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from knowledge_base.mcp_server import KBV2MCPProtocol
+
+kbv2_protocol = KBV2MCPProtocol()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for MCP protocol."""
+    await kbv2_protocol.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            await kbv2_protocol.handle_message(websocket, message)
+    except WebSocketDisconnect:
+        kbv2_protocol.disconnect(websocket)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -136,18 +152,6 @@ app.include_router(graph_api.router, tags=["graphs"])
 app.include_router(document_api.router, tags=["documents"])
 app.include_router(schema_api.router, tags=["schemas"])
 
-from knowledge_base.mcp_server import kbv2_protocol
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await kbv2_protocol.connect(websocket)
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await kbv2_protocol.handle_message(websocket, message)
-    except WebSocketDisconnect:
-        kbv2_protocol.disconnect(websocket)
 
 
 @app.get("/api/v1/openapi")
@@ -228,8 +232,9 @@ async def startup_event():
             )
             set_session_factory(session_factory)
             logger.info("Async session factory initialized")
+        else:
+            logger.warning("DATABASE_URL environment variable not set. Skipping database initialization.")
 
-        from knowledge_base.mcp_server import kbv2_protocol
 
         await kbv2_protocol.initialize()
         logger.info("MCP server initialized")

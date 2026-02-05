@@ -2,7 +2,7 @@
 
 ## 🚀 Quick Ingestion Commands
 
-```bash
+```
 # Fastest way - CLI with all features enabled
 uv run python -m knowledge_base.clients.cli ingest /path/to/document.md \
   --name "My Document" \

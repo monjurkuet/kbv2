@@ -136,18 +136,30 @@ class IngestionOrchestrator:
                 file_path=str(file_path),
             ):
                 await self._send_progress(
-                    {"step": "started", "status": "started", "message": "Processing document"}
+                    {
+                        "step": "started",
+                        "status": "started",
+                        "message": "Processing document",
+                    }
                 )
 
                 if not domain:
+                    # Read file content for domain detection
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content_text = f.read()
+
                     doc_for_detection = await self._document_service.create_document(
                         file_path=file_path,
                         document_name=document_name,
                         vector_store=self._vector_store,
                     )
-                    domain = await self._domain_service.detect_domain(doc_for_detection)
+                    domain = await self._domain_service.detect_domain(
+                        doc_for_detection, content_text
+                    )
                     if not domain:
                         domain = "GENERAL"  # Default domain if detection fails
+
+                    logger.info(f"Auto-detected domain: {domain}")
 
                 document = await self._document_service.process(
                     file_path=file_path,
@@ -157,7 +169,11 @@ class IngestionOrchestrator:
                 )
 
                 await self._send_progress(
-                    {"step": "document_processed", "status": "completed", "message": "Document processed"}
+                    {
+                        "step": "document_processed",
+                        "status": "completed",
+                        "message": "Document processed",
+                    }
                 )
 
                 async with self._vector_store.get_session() as session:
@@ -255,7 +271,11 @@ class IngestionOrchestrator:
     ) -> Document:
         """Finalize document - update domain and status."""
         await self._send_progress(
-            {"step": "finalizing", "status": "started", "message": "Finalizing document"}
+            {
+                "step": "finalizing",
+                "status": "started",
+                "message": "Finalizing document",
+            }
         )
 
         async with self._vector_store.get_session() as session:
@@ -290,7 +310,11 @@ class IngestionOrchestrator:
                     document = refreshed_doc
 
         await self._send_progress(
-            {"step": "finalizing", "status": "completed", "message": "Document complete"}
+            {
+                "step": "finalizing",
+                "status": "completed",
+                "message": "Document complete",
+            }
         )
 
         return document
