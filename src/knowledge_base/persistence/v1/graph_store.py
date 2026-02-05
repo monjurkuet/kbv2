@@ -217,6 +217,17 @@ class GraphStore:
         if not center_entity:
             raise ValueError(f"Entity {entity_id} not found")
 
+        if depth > 1:
+            return await self._get_entity_neighborhood_multi_depth(
+                center_entity=center_entity,
+                depth=depth,
+                direction=direction,
+                min_confidence=min_confidence,
+                max_nodes=max_nodes,
+                node_types=node_types,
+                edge_types=edge_types,
+            )
+
         # Build edge query based on direction
         if direction == GraphTraversalDirection.OUTGOING:
             edge_filter = Edge.source_id == entity_id
@@ -283,6 +294,80 @@ class GraphStore:
                 # Apply node filter if specified
                 if node_types is None or neighbor.entity_type in node_types:
                     neighborhood.append((neighbor, edge))
+
+        return center_entity, neighborhood
+
+    async def _get_entity_neighborhood_multi_depth(
+        self,
+        center_entity: Entity,
+        depth: int,
+        direction: GraphTraversalDirection,
+        min_confidence: float,
+        max_nodes: int,
+        node_types: List[str] | None,
+        edge_types: List[str] | None,
+    ) -> Tuple[Entity, List[Tuple[Entity, Edge]]]:
+        """Traverse the graph up to a specified depth using iterative expansion."""
+        visited: set[UUID] = {center_entity.id}
+        frontier: set[UUID] = {center_entity.id}
+        neighborhood: list[tuple[Entity, Edge]] = []
+
+        for _ in range(depth):
+            if not frontier or len(visited) >= max_nodes:
+                break
+
+            if direction == GraphTraversalDirection.OUTGOING:
+                edge_filter = Edge.source_id.in_(frontier)
+            elif direction == GraphTraversalDirection.INCOMING:
+                edge_filter = Edge.target_id.in_(frontier)
+            else:
+                edge_filter = or_(
+                    Edge.source_id.in_(frontier),
+                    Edge.target_id.in_(frontier),
+                )
+
+            edge_query = select(Edge).where(
+                and_(edge_filter, Edge.confidence >= min_confidence)
+            )
+            if edge_types:
+                edge_query = edge_query.where(Edge.edge_type.in_(edge_types))
+
+            edge_query = edge_query.limit(max_nodes * 2)
+            result = await self.db.execute(edge_query)
+            edges = result.scalars().all()
+
+            if not edges:
+                break
+
+            neighbor_ids: set[UUID] = set()
+            for edge in edges:
+                if edge.source_id in frontier and edge.target_id not in visited:
+                    neighbor_ids.add(edge.target_id)
+                if edge.target_id in frontier and edge.source_id not in visited:
+                    neighbor_ids.add(edge.source_id)
+
+            neighbor_ids.difference_update(visited)
+            if not neighbor_ids:
+                break
+
+            entity_query = select(Entity).where(Entity.id.in_(neighbor_ids))
+            if node_types:
+                entity_query = entity_query.where(Entity.entity_type.in_(node_types))
+            result = await self.db.execute(entity_query)
+            neighbor_entities = {e.id: e for e in result.scalars().all()}
+
+            for edge in edges:
+                neighbor_id = None
+                if edge.source_id in frontier and edge.target_id in neighbor_entities:
+                    neighbor_id = edge.target_id
+                elif edge.target_id in frontier and edge.source_id in neighbor_entities:
+                    neighbor_id = edge.source_id
+
+                if neighbor_id:
+                    neighborhood.append((neighbor_entities[neighbor_id], edge))
+
+            visited.update(neighbor_entities.keys())
+            frontier = set(neighbor_entities.keys())
 
         return center_entity, neighborhood
 
