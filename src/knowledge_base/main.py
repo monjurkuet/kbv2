@@ -17,7 +17,6 @@ load_dotenv()  # Load environment variables from .env
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
@@ -153,7 +152,6 @@ app.include_router(document_api.router, tags=["documents"])
 app.include_router(schema_api.router, tags=["schemas"])
 
 
-
 @app.get("/api/v1/openapi")
 async def get_openapi():
     """
@@ -176,29 +174,6 @@ async def get_openapi():
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
-
-
-# Mount static files for the dashboard
-import os
-
-dashboard_version = os.getenv("DASHBOARD_VERSION", "v1")
-base_static_dir = Path(__file__).parent / "static"
-
-if dashboard_version == "v2":
-    static_dir = base_static_dir / "shizuku_xp" / "build"
-else:
-    static_dir = base_static_dir / "v1_legacy"
-
-if not static_dir.exists():
-    # Fallback or just log
-    logger.warning(
-        f"Static directory {static_dir} does not exist. Dashboard may not load."
-    )
-else:
-    logger.info(f"Mounting dashboard version {dashboard_version} from {static_dir}")
-    app.mount(
-        "/dashboard", StaticFiles(directory=str(static_dir), html=True), name="static"
-    )
 
 
 async def startup_event():
@@ -233,8 +208,9 @@ async def startup_event():
             set_session_factory(session_factory)
             logger.info("Async session factory initialized")
         else:
-            logger.warning("DATABASE_URL environment variable not set. Skipping database initialization.")
-
+            logger.warning(
+                "DATABASE_URL environment variable not set. Skipping database initialization."
+            )
 
         await kbv2_protocol.initialize()
         logger.info("MCP server initialized")
@@ -579,31 +555,33 @@ async def shutdown_event():
     Runs when the FastAPI application shuts down.
     """
     logger.info("KBV2 Knowledge Base API shutting down...")
-    
+
     # Cleanup database connections
     try:
         from knowledge_base.common.dependencies import get_session_factory
+
         session_factory = get_session_factory()
         if session_factory:
             logger.info("Closing database session factory")
     except Exception as e:
         logger.error(f"Error closing session factory: {e}")
-    
+
     # Close vector store connections
     try:
         from knowledge_base.persistence.v1.vector_store import VectorStore
+
         # VectorStore connections are managed by the orchestrator
         logger.info("Vector store cleanup completed")
     except Exception as e:
         logger.error(f"Error closing vector store: {e}")
-    
+
     # Close MCP server
     try:
         await kbv2_protocol.shutdown()
         logger.info("MCP server shutdown complete")
     except Exception as e:
         logger.error(f"Error shutting down MCP server: {e}")
-    
+
     logger.info("KBV2 API shutdown complete")
 
 

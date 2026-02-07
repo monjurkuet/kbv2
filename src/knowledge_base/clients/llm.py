@@ -71,8 +71,19 @@ class AsyncLLMClient:
         """Fetch available models from the API."""
         try:
             response = await self._client.models.list()
-            self._available_models = [model.id for model in response.data]
-            logger.info(f"Discovered {len(self._available_models)} models")
+            all_models = [model.id for model in response.data]
+            # Filter out gemini-3 models (cooldown/rate limit issues)
+            self._available_models = [
+                m
+                for m in all_models
+                if "gemini-3" not in m.lower() and "gemini-4" not in m.lower()
+            ]
+            filtered_count = len(all_models) - len(self._available_models)
+            if filtered_count > 0:
+                logger.info(
+                    f"Filtered out {filtered_count} gemini-3/4 models due to rate limits"
+                )
+            logger.info(f"Discovered {len(self._available_models)} usable models")
         except Exception as e:
             logger.error(f"Failed to fetch models: {e}")
             self._available_models = []

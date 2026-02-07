@@ -572,62 +572,7 @@ Checks Passed: 41/41
 
 ---
 
-## Appendix C: Systemd Service
-
-### Create Systemd Service File
-
-Create `/etc/systemd/system/kbv2.service`:
-
-```ini
-[Unit]
-Description=KBv2 Crypto Knowledgebase
-After=network.target postgresql.service
-Wants=postgresql.service
-
-[Service]
-Type=simple
-User=agentzero
-WorkingDirectory=/home/muham/development/kbv2
-Environment=PYTHONPATH=/home/muham/development/kbv2/src
-EnvironmentFile=/home/muham/development/kbv2/.env.production
-
-# Use production entry point
-ExecStart=/home/muham/.local/bin/uv run python -m knowledge_base.production
-ExecReload=/bin/kill -HUP $MAINPID
-
-Restart=on-failure
-RestartSec=5s
-
-# Resource limits
-LimitNOFILE=65535
-MemoryMax=4G
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Enable and Start Service
-
-```bash
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Enable service (start on boot)
-sudo systemctl enable kbv2
-
-# Start service
-sudo systemctl start kbv2
-
-# Check status
-sudo systemctl status kbv2
-
-# View logs
-sudo journalctl -u kbv2 -f
-```
-
----
-
-## Appendix D: Quick Deployment Checklist
+## Appendix C: Quick Deployment Checklist
 
 ### Pre-Deployment (Before production)
 
@@ -648,9 +593,6 @@ alembic current
 ### Deployment Steps
 
 ```bash
-# 1. Stop existing service
-sudo systemctl stop kbv2
-
 # 2. Pull latest code
 cd /home/muham/development/kbv2
 git pull
@@ -660,9 +602,6 @@ uv run alembic upgrade head
 
 # 4. Verify deployment
 uv run python verify_deployment.py
-
-# 5. Start service
-sudo systemctl start kbv2
 
 # 6. Verify running
 curl http://localhost:8765/api/v2/health
@@ -677,6 +616,4 @@ curl http://localhost:8765/api/v2/health
 curl http://localhost:8765/metrics
 curl http://localhost:8765/api/v2/stats
 
-# Check logs
-sudo journalctl -u kbv2 -n 50
 ```

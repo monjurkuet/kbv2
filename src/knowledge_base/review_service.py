@@ -18,7 +18,6 @@ from knowledge_base.intelligence import (
     EntityVerification,
     RiskLevel,
 )
-from knowledge_base.common.resilient_gateway import ResilientGatewayClient
 
 logger = logging.getLogger(__name__)
 

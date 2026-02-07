@@ -86,36 +86,36 @@ class AdaptiveIngestionEngine:
 
         prompt = f"""You are an expert document processing system. Analyze this document and recommend optimal processing parameters.
 
-DOCUMENT SAMPLE:
-```
-{sample_text}
-```
+                    DOCUMENT SAMPLE:
+                    ```
+                    {sample_text}
+                    ```
 
-FILENAME: {document_name}
-FILE SIZE: {file_size_bytes} bytes
+                    FILENAME: {document_name}
+                    FILE SIZE: {file_size_bytes} bytes
 
-Evaluate based on:
-1. **Complexity Score**: Count technical terms, entities, relationships. Rate 1-10.
-2. **Structure**: Is it highly structured (headings, sections) or narrative?
-3. **Entity Density**: Entities per paragraph (0=none, 5=very dense)
-4. **Domain Specificity**: Is this technical/financial/medical/legal or general?
+                    Evaluate based on:
+                    1. **Complexity Score**: Count technical terms, entities, relationships. Rate 1-10.
+                    2. **Structure**: Is it highly structured (headings, sections) or narrative?
+                    3. **Entity Density**: Entities per paragraph (0=none, 5=very dense)
+                    4. **Domain Specificity**: Is this technical/financial/medical/legal or general?
 
-Provide a JSON with these fields:
-- complexity: "simple" | "moderate" | "complex"
-- chunk_size: 512, 1024, 1536, 2048, 3072, or 4096 (optimal tokens per chunk)
-- approach: "gleaning" | "gleaning_enhanced" | "multi_agent"
-- max_enhancement_iterations: 1-5 (only if multi_agent)
-- expected_entity_count: estimated entities (0-500)
-- justification: brief explanation
-- domains: list of domains ["tech", "finance", "medical", "legal", "scientific", "general"]
-- estimated_processing_time: "fast" (<2min), "medium" (2-10min), "slow" (>10min)
+                    Provide a JSON with these fields:
+                    - complexity: "simple" | "moderate" | "complex"
+                    - chunk_size: 512, 1024, 1536, 2048, 3072, or 4096 (optimal tokens per chunk)
+                    - approach: "gleaning" | "gleaning_enhanced" | "multi_agent"
+                    - max_enhancement_iterations: 1-5 (only if multi_agent)
+                    - expected_entity_count: estimated entities (0-500)
+                    - justification: brief explanation
+                    - domains: list of domains ["tech", "finance", "medical", "legal", "scientific", "general"]
+                    - estimated_processing_time: "fast" (<2min), "medium" (2-10min), "slow" (>10min)
 
-EXAMPLES:
-- Simple news article: {{"complexity": "simple", "chunk_size": 1024, "approach": "gleaning", "expected_entity_count": 5}}
-- Financial report: {{"complexity": "moderate", "chunk_size": 1536, "approach": "multi_agent", "max_enhancement_iterations": 2}}
-- Technical research paper: {{"complexity": "complex", "chunk_size": 2048, "approach": "multi_agent", "max_enhancement_iterations": 3}}
+                    EXAMPLES:
+                    - Simple news article: {{"complexity": "simple", "chunk_size": 1024, "approach": "gleaning", "expected_entity_count": 5}}
+                    - Financial report: {{"complexity": "moderate", "chunk_size": 1536, "approach": "multi_agent", "max_enhancement_iterations": 2}}
+                    - Technical research paper: {{"complexity": "complex", "chunk_size": 2048, "approach": "multi_agent", "max_enhancement_iterations": 3}}
 
-Respond with ONLY the JSON, no markdown or explanations."""
+                    Respond with ONLY the JSON, no markdown or explanations."""
 
         try:
             # Log the analysis request

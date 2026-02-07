@@ -230,7 +230,11 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
             )
 
             # Entity extraction (with potential prompt evolution)
-            entities, edges = await self._extract_with_self_improvement(
+            (
+                entities,
+                edges,
+                extraction_quality,
+            ) = await self._extract_with_self_improvement(
                 document=document,
                 chunks=enriched_chunks,
                 domain=domain,
@@ -251,6 +255,7 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
                 entities=entities,
                 edges=edges,
                 domain=domain,
+                extraction_quality=extraction_quality,
             )
 
             # Continue with base processing
@@ -362,7 +367,14 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
             recommendation=recommendation,
         )
 
-        return entities, edges
+        # Return quality if available from extraction
+        extraction_quality = (
+            getattr(entities, "_extraction_quality", None)
+            if hasattr(entities, "_extraction_quality")
+            else None
+        )
+
+        return entities, edges, extraction_quality
 
     async def _validate_extraction(
         self,
@@ -417,6 +429,7 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
         entities: list,
         edges: list,
         domain: str,
+        extraction_quality: Optional[Any] = None,
     ) -> None:
         """Store high-quality extractions in Experience Bank.
 
@@ -425,44 +438,64 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
             entities: Extracted entities
             edges: Extracted edges
             domain: Document domain
+            extraction_quality: Optional quality score from extraction
         """
         if not self._enable_experience_bank or not self._experience_bank:
             return
 
         try:
-            # Calculate quality score (simplified - use entity count as proxy)
-            # In production, use actual quality evaluation
-            quality_score = min(0.5 + (len(entities) * 0.05), 1.0)
+            # Calculate quality score using multiple factors
+            quality_score = self._calculate_extraction_quality(
+                entities=entities,
+                edges=edges,
+                extraction_quality=extraction_quality,
+            )
 
-            if quality_score >= 0.85:
-                # Store experience for each chunk
-                for chunk in chunks:
-                    # Find entities for this chunk
+            # Lower threshold to 0.75 to capture more examples
+            if quality_score >= 0.75:
+                stored_count = 0
+
+                # Store experience for each chunk (distribute entities across chunks)
+                entities_per_chunk = max(1, len(entities) // max(len(chunks), 1))
+
+                for i, chunk in enumerate(chunks):
+                    # Distribute entities across chunks
+                    start_idx = i * entities_per_chunk
+                    end_idx = (
+                        start_idx + entities_per_chunk
+                        if i < len(chunks) - 1
+                        else len(entities)
+                    )
+                    chunk_entities_list = entities[start_idx:end_idx]
+
                     chunk_entities = [
                         {
                             "name": e.name,
                             "entity_type": e.entity_type,
-                            "description": e.description,
-                            "confidence": e.confidence,
+                            "description": getattr(e, "description", "")[:200],
+                            "confidence": getattr(e, "confidence", 0.8),
                         }
-                        for e in entities
-                        if hasattr(e, "chunk_id") and e.chunk_id == chunk.id
+                        for e in chunk_entities_list
                     ]
 
+                    # Get edges that connect these entities
+                    entity_ids = {str(e.id) for e in chunk_entities_list}
                     chunk_edges = [
                         {
                             "source": str(e.source_id),
                             "target": str(e.target_id),
-                            "relationship_type": e.edge_type.value
-                            if hasattr(e.edge_type, "value")
-                            else str(e.edge_type),
+                            "relationship_type": str(e.edge_type)
+                            if hasattr(e, "edge_type")
+                            else "RELATED_TO",
                         }
                         for e in edges
-                    ]
+                        if str(getattr(e, "source_id", "")) in entity_ids
+                        or str(getattr(e, "target_id", "")) in entity_ids
+                    ][:10]  # Limit edges per chunk
 
                     if chunk_entities:
                         await self._experience_bank.store_experience(
-                            text=chunk.text,
+                            text=chunk.text[:2000],  # Limit text length
                             entities=chunk_entities,
                             relationships=chunk_edges,
                             quality_score=quality_score,
@@ -470,13 +503,65 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
                             chunk_id=chunk.id,
                             extraction_method="multi_agent",
                         )
+                        stored_count += 1
 
                 logger.info(
-                    f"Stored {len(chunks)} extraction experiences (quality: {quality_score:.2f})"
+                    f"✅ Stored {stored_count} extraction experiences "
+                    f"for domain '{domain}' (quality: {quality_score:.2f})"
+                )
+            else:
+                logger.debug(
+                    f"Quality score {quality_score:.2f} below threshold (0.75), "
+                    f"not storing experience"
                 )
 
         except Exception as e:
             logger.warning(f"Failed to store extraction experience: {e}")
+            # Don't fail the pipeline if experience storage fails
+
+    def _calculate_extraction_quality(
+        self,
+        entities: list,
+        edges: list,
+        extraction_quality: Optional[Any] = None,
+    ) -> float:
+        """Calculate extraction quality score using multiple factors.
+
+        Args:
+            entities: Extracted entities
+            edges: Extracted edges
+            extraction_quality: Optional quality score from extractor
+
+        Returns:
+            Quality score 0.0-1.0
+        """
+        scores = []
+
+        # Factor 1: Entity count (more entities = more content extracted)
+        entity_score = min(len(entities) / 10, 1.0) * 0.2  # 20% weight
+        scores.append(entity_score)
+
+        # Factor 2: Edge count (relationships show understanding)
+        edge_score = min(len(edges) / 5, 1.0) * 0.2  # 20% weight
+        scores.append(edge_score)
+
+        # Factor 3: Entity confidence (average confidence)
+        if entities:
+            avg_confidence = sum(getattr(e, "confidence", 0.8) for e in entities) / len(
+                entities
+            )
+            scores.append(avg_confidence * 0.3)  # 30% weight
+        else:
+            scores.append(0.0)
+
+        # Factor 4: Extraction quality from pipeline (if available)
+        if extraction_quality and hasattr(extraction_quality, "overall_score"):
+            scores.append(extraction_quality.overall_score * 0.3)  # 30% weight
+        else:
+            # Default to decent score if no quality data
+            scores.append(0.7 * 0.3)
+
+        return min(sum(scores), 1.0)
 
     async def evolve_prompts(
         self,

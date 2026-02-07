@@ -1,9 +1,9 @@
-"""Async embedding client using OpenAI SDK.
+"""Async embedding client using Ollama native API.
 
-Uses AsyncOpenAI with Ollama-compatible endpoint for bge-m3 embeddings.
+Uses Ollama's native /api/embeddings endpoint for bge-m3 embeddings.
 
 Environment Variables:
-- EMBEDDING_API_BASE: API base URL (default: http://localhost:11434/v1)
+- EMBEDDING_API_BASE: API base URL (default: http://localhost:11434)
 - EMBEDDING_API_KEY: API key (default: sk-dummy)
 """
 
@@ -12,7 +12,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from openai import AsyncOpenAI
+import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -34,7 +34,7 @@ class EmbeddingConfig(BaseModel):
 
 
 class EmbeddingClient:
-    """Async embedding client using OpenAI SDK.
+    """Async embedding client using Ollama native API.
 
     Compatible with Ollama running bge-m3 model.
     """
@@ -59,16 +59,26 @@ class EmbeddingClient:
         if config:
             self.model = config.embedding_model
             self.dimensions = config.dimensions
-            base_url = config.embedding_url
+            self._base_url = config.embedding_url
         else:
             self.model = model or DEFAULT_EMBEDDING_MODEL
             self.dimensions = dimensions or DEFAULT_EMBEDDING_DIMENSIONS
+            self._base_url = base_url or os.getenv(
+                "EMBEDDING_API_BASE", "http://localhost:11434"
+            )
 
-        self._client = AsyncOpenAI(
-            base_url=base_url
-            or os.getenv("EMBEDDING_API_BASE", "http://localhost:11434/v1"),
-            api_key=api_key or os.getenv("EMBEDDING_API_KEY", "sk-dummy"),
-        )
+        # Remove trailing /v1 if present
+        if self._base_url.endswith("/v1"):
+            self._base_url = self._base_url[:-3]
+
+        self._api_key = api_key or os.getenv("EMBEDDING_API_KEY", "sk-dummy")
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=60.0)
+        return self._client
 
     async def embed_text(self, text: str) -> List[float]:
         """Embed a single text.
@@ -79,14 +89,24 @@ class EmbeddingClient:
         Returns:
             Embedding vector.
         """
-        response = await self._client.embeddings.create(
-            model=self.model,
-            input=[text],
-        )
-        return response.data[0].embedding
+        client = await self._get_client()
+        url = f"{self._base_url}/api/embeddings"
+
+        payload = {
+            "model": self.model,
+            "prompt": text,
+        }
+
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+        return data["embedding"]
 
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Embed multiple texts in a single API call.
+        """Embed multiple texts in sequential API calls.
+
+        Note: Ollama doesn't support batch embeddings natively, so we do sequential calls.
 
         Args:
             texts: List of texts to embed.
@@ -97,11 +117,12 @@ class EmbeddingClient:
         if not texts:
             return []
 
-        response = await self._client.embeddings.create(
-            model=self.model,
-            input=texts,
-        )
-        return [data.embedding for data in response.data]
+        embeddings = []
+        for text in texts:
+            embedding = await self.embed_text(text)
+            embeddings.append(embedding)
+
+        return embeddings
 
     async def embed_texts(
         self,
@@ -145,7 +166,9 @@ class EmbeddingClient:
 
     async def close(self) -> None:
         """Close the async client."""
-        await self._client.close()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def __aenter__(self) -> "EmbeddingClient":
         """Enter async context.

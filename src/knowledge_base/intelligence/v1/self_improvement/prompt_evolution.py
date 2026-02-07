@@ -299,43 +299,67 @@ class PromptEvolutionEngine:
         Returns:
             List of mutated variants
         """
-        mutation_prompt = f"""You are an expert prompt engineer for cryptocurrency entity extraction.
+        # Truncate base prompt if too long to avoid hitting token limits
+        max_base_length = 2000
+        truncated_base = (
+            base_prompt[:max_base_length] + "..."
+            if len(base_prompt) > max_base_length
+            else base_prompt
+        )
 
-Generate {n_variants} variations of the following extraction prompt for the {domain} domain.
+        mutation_prompt = f"""You are an expert prompt engineer. Generate {n_variants} prompt variations.
 
-Each variation should emphasize different aspects:
-1. Focus on PRECISION - reduce false positives, strict entity boundaries
-2. Focus on RECALL - catch more entities, comprehensive coverage
-3. Focus on RELATIONSHIPS - extract connections between entities
-4. Focus on METRICS - extract numerical data, amounts, percentages
-5. Focus on CONTEXT - understand entity significance in context
+Base prompt (truncated):
+{truncated_base}
 
-Base prompt:
-{base_prompt}
+Create {n_variants} variations for domain: {domain}
+Each variation should emphasize: precision, recall, relationships, metrics, or context
 
-For each variation:
-1. Keep the core extraction task
-2. Adjust the emphasis as specified
-3. Add domain-specific examples
-4. Modify instructions to match the focus
+Respond with ONLY this exact JSON format (no markdown, no text outside JSON):
+[{{"name":"{domain}_precision","focus":"precision","prompt_text":"Your precision-focused prompt here"}}]
 
-Output as JSON array:
-[
-  {{
-    "name": "variant_name",
-    "focus": "precision|recall|relationships|metrics|context",
-    "prompt_text": "full prompt text"
-  }}
-]
-"""
+Requirements:
+- Valid JSON array only
+- Each object has: name, focus, prompt_text
+- No markdown code blocks
+- No conversational text"""
 
+        prompt_content = ""
         try:
             response = await self.gateway.complete(
                 prompt=mutation_prompt, temperature=self.config.mutation_temperature
             )
 
-            # Access content from dictionary response
-            prompt_content = response["content"]
+            # Extract content from response (handle both dict and object responses)
+            if isinstance(response, dict):
+                prompt_content = response.get("content", "")
+            elif hasattr(response, "choices") and response.choices:
+                choice = response.choices[0]
+                if isinstance(choice, dict):
+                    prompt_content = choice.get("message", {}).get("content", "")
+                else:
+                    prompt_content = str(choice)
+            else:
+                prompt_content = str(response)
+
+            # Clean up the content (remove markdown code blocks if present)
+            prompt_content = prompt_content.strip()
+            if prompt_content.startswith("```json"):
+                prompt_content = prompt_content[7:]
+            if prompt_content.startswith("```"):
+                prompt_content = prompt_content[3:]
+            if prompt_content.endswith("```"):
+                prompt_content = prompt_content[:-3]
+            prompt_content = prompt_content.strip()
+
+            # Check for empty response
+            if not prompt_content:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Empty response from LLM for domain {domain} mutations"
+                )
+                return []
 
             # Parse mutations
             mutations_data = json.loads(prompt_content)
@@ -353,7 +377,14 @@ Output as JSON array:
 
             return variants
 
-        except (json.JSONDecodeError, KeyError, Exception) as e:
+        except json.JSONDecodeError as e:
+            import logging
+
+            logging.getLogger(__name__).error(
+                f"JSON decode error for domain {domain}: {e}. Content: {prompt_content[:200]}..."
+            )
+            return []
+        except (KeyError, Exception) as e:
             import logging
 
             logging.getLogger(__name__).error(
@@ -536,8 +567,32 @@ Output as JSON array:
         response = await self.gateway.complete(prompt=formatted_prompt, temperature=0.1)
 
         try:
-            return json.loads(response["content"])
-        except (json.JSONDecodeError, KeyError):
+            # Extract content from response (handle both dict and object responses)
+            content = ""
+            if isinstance(response, dict):
+                content = response.get("content", "")
+            elif hasattr(response, "choices") and response.choices:
+                choice = response.choices[0]
+                if isinstance(choice, dict):
+                    content = choice.get("message", {}).get("content", "")
+                else:
+                    content = str(choice)
+
+            # Clean up the content
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+
+            if not content:
+                return {"entities": [], "relationships": []}
+
+            return json.loads(content)
+        except (json.JSONDecodeError, KeyError, Exception):
             return {"entities": [], "relationships": []}
 
     def _estimate_quality(

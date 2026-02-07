@@ -75,7 +75,7 @@ class IngestionOrchestrator:
         await self._vector_store.initialize()
 
         self._domain_service = DomainDetectionService()
-        await self._domain_service.initialize()
+        await self._domain_service.initialize(llm_client=self._gateway)
 
         self._adaptive_engine = AdaptiveIngestionEngine(gateway=self._gateway)
 
