@@ -2,8 +2,6 @@
 """Comprehensive KBV2 Feature Verification."""
 
 import asyncio
-import sys
-from pathlib import Path
 
 # Feature checklist based on docs/README.md
 FEATURES = {
@@ -57,11 +55,8 @@ async def verify_features():
         from knowledge_base.orchestration.domain_detection_service import (
             DomainDetectionService,
         )
-        from knowledge_base.orchestration.quality_assurance_service import (
-            QualityAssuranceService,
-        )
         from knowledge_base.persistence.v1.vector_store import VectorStore
-        from knowledge_base.common.resilient_gateway import ResilientGatewayClient
+        from knowledge_base.clients.llm import AsyncLLMClient
 
         vector_store = VectorStore()
         await vector_store.initialize()
@@ -72,7 +67,7 @@ async def verify_features():
         domain_service = DomainDetectionService()
         await domain_service.initialize()
 
-        gateway = ResilientGatewayClient()
+        gateway = AsyncLLMClient()
 
         entity_service = EntityPipelineService()
         await entity_service.initialize(
@@ -84,13 +79,13 @@ async def verify_features():
         print("   ✅ DomainDetectionService - Initialized")
         print("   ✅ EntityPipelineService - Initialized")
         print("   ✅ VectorStore - Initialized")
-        print("   ✅ ResilientGatewayClient - Initialized")
+        print("   ✅ AsyncLLMClient - Initialized")
 
         results["DocumentPipelineService"] = True
         results["DomainDetectionService"] = True
         results["EntityPipelineService"] = True
         results["VectorStore"] = True
-        results["ResilientGatewayClient"] = True
+        results["AsyncLLMClient"] = True
 
     except Exception as e:
         print(f"   ❌ Core services failed: {e}")
@@ -136,7 +131,7 @@ async def verify_features():
         try:
             module = __import__(module_path, fromlist=[name])
             cls = getattr(module, name)
-            instance = cls()
+            _instance = cls()
             print(f"   ✅ {name} - Available")
             results[name] = True
         except Exception as e:
@@ -146,11 +141,11 @@ async def verify_features():
     # Test GleaningService separately (needs gateway)
     try:
         from knowledge_base.ingestion.v1.gleaning_service import GleaningService
-        from knowledge_base.common.gateway import GatewayClient
+        from knowledge_base.clients.llm import AsyncLLMClient
 
-        gateway = GatewayClient()
-        gleaning = GleaningService(gateway=gateway)
-        print(f"   ✅ GleaningService - Available (with gateway)")
+        gateway = AsyncLLMClient()
+        _gleaning = GleaningService(gateway=gateway)
+        print("   ✅ GleaningService - Available (with gateway)")
         results["GleaningService"] = True
     except Exception as e:
         print(f"   ⚠️  GleaningService - {str(e)[:50]}")
@@ -222,15 +217,11 @@ async def verify_features():
     # Test 7: Common Utilities
     print("\n🛠️  Testing Common Utilities...")
     try:
-        from knowledge_base.common.gateway import GatewayClient
-        from knowledge_base.common.resilient_gateway.gateway import (
-            ResilientGatewayClient,
-        )
+        from knowledge_base.clients.llm import AsyncLLMClient
         from knowledge_base.common.temporal_utils import TemporalNormalizer
         from knowledge_base.common.dependencies import get_session_factory
 
-        print("   ✅ GatewayClient - Available")
-        print("   ✅ ResilientGatewayClient - Available")
+        print("   ✅ AsyncLLMClient - Available")
         print("   ✅ TemporalNormalizer - Available")
         print("   ✅ Session Factory - Available")
         results["Utilities"] = True

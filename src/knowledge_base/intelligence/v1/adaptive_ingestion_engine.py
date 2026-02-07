@@ -1,11 +1,8 @@
 """Adaptive ingestion engine with LLM-powered pipeline optimization."""
 
-import asyncio
 import json
 import logging
-from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -15,9 +12,6 @@ from knowledge_base.common.llm_logging_wrapper import (
     log_llm_result,
 )
 from knowledge_base.ingestion.v1.gleaning_service import GleaningService
-from knowledge_base.intelligence.v1.multi_agent_extractor import (
-    EntityExtractionManager,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +143,7 @@ Respond with ONLY the JSON, no markdown or explanations."""
             )
 
             # Extract content from response
-            content = ""
-            if hasattr(response, "choices") and response.choices:
-                content = response.choices[0].get("message", {}).get("content", "")
-            elif isinstance(response, dict) and "choices" in response:
-                content = response["choices"][0]["message"]["content"]
+            content = response["content"]
 
             # Parse JSON response
             json_match = {}

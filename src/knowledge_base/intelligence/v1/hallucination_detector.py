@@ -4,7 +4,9 @@ This module provides entity quality verification using LLM-based judgment
 to detect fabricated attributes vs. supported attributes.
 """
 
+import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -16,6 +18,8 @@ from knowledge_base.config.constants import (
     HALLUCINATION_THRESHOLD,
     DEFAULT_BATCH_SIZE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class VerificationStatus(str, Enum):
@@ -165,13 +169,14 @@ Respond with JSON only:
 }}"""
 
         try:
-            response_text = await client.complete(
+            # Use complete_json for automatic parsing
+            response_data = await client.complete_json(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
-            response = self._parse_json_response(response_text)
+            response = response_data.get("json", {}) or {}
 
             status = VerificationStatus(response.get("status", "inconclusive"))
             confidence = float(response.get("confidence", 0.5))
@@ -419,12 +424,13 @@ Respond with JSON:
 }}"""
 
         try:
-            response = await client.complete_json(
+            response_data = await client.complete_json(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
+            response = response_data.get("json", {}) or {}
 
             return {
                 "claim": claim,
@@ -488,12 +494,13 @@ Respond with JSON:
 }}"""
 
         try:
-            response = await client.complete_json(
+            response_data = await client.complete_json(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
+            response = response_data.get("json", {}) or {}
 
             return {
                 "primary_entity": primary_entity.get("name", "unknown"),
@@ -540,7 +547,7 @@ Respond with JSON:
             verifications
         )
 
-        risk_distribution = {}
+        risk_distribution: dict[str, int] = {}
         for v in verifications:
             risk_level = v.risk_level.value
             risk_distribution[risk_level] = risk_distribution.get(risk_level, 0) + 1
@@ -555,9 +562,6 @@ Respond with JSON:
 
     async def close(self) -> None:
         """Close the LLM client."""
-        if self._llm_client:
-            await self._llm_client.close()
-            self._llm_client = None
-
-
-import asyncio
+        if self._gateway_client:
+            await self._gateway_client.close()
+            self._gateway_client = None

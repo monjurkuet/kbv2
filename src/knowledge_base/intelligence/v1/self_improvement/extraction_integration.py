@@ -12,6 +12,9 @@ from knowledge_base.intelligence.v1.self_improvement import (
     ExperienceBankMiddleware,
 )
 from knowledge_base.persistence.v1.schema import Chunk
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ExperienceEnhancedPerception:
@@ -57,7 +60,7 @@ class ExperienceEnhancedPerception:
             return enriched
         except Exception as e:
             # Log but don't fail extraction
-            print(f"Warning: Failed to enrich prompt with examples: {e}")
+            logger.warning(f"Failed to enrich prompt with examples: {e}", exc_info=True)
             return base_prompt
 
     async def store_successful_extraction(
@@ -96,7 +99,7 @@ class ExperienceEnhancedPerception:
                 extraction_method=extraction_method,
             )
         except Exception as e:
-            print(f"Warning: Failed to store extraction experience: {e}")
+            logger.warning(f"Failed to store extraction experience: {e}", exc_info=True)
             return None
 
 
@@ -145,7 +148,7 @@ class ExperienceBankTracker:
         try:
             return await self.experience_bank.get_experience_statistics()
         except Exception as e:
-            print(f"Warning: Failed to get experience bank stats: {e}")
+            logger.warning(f"Failed to get experience bank stats: {e}", exc_info=True)
             return None
 
 

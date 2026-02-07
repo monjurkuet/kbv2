@@ -595,8 +595,6 @@ IMPORTANT: Respond with valid JSON only."""
         Returns:
             List of extraction results from each prompt.
         """
-        from knowledge_base.ingestion.v1.gleaning_service import ExtractionResult
-
         results = []
 
         for prompt in sorted(prompts.prompts, key=lambda p: p.priority):
@@ -608,7 +606,10 @@ IMPORTANT: Respond with valid JSON only."""
                     json_mode=True,
                 )
 
-                result = self._parse_extraction_result(response, prompt.goal_name)
+                # Handle AsyncLLMClient dict response
+                response_text = response["content"]
+
+                result = self._parse_extraction_result(response_text, prompt.goal_name)
                 results.append(result)
 
                 logger.info(

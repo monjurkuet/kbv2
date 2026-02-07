@@ -11,10 +11,8 @@ Based on GraphMaster architecture from arXiv:2504.00711.
 
 import asyncio
 import json
-import re
-from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -27,8 +25,6 @@ from knowledge_base.intelligence.v1.extraction_logging import (
 from knowledge_base.persistence.v1.graph_store import GraphStore
 from knowledge_base.persistence.v1.schema import (
     Chunk,
-    Edge,
-    EdgeType,
     Entity,
 )
 from knowledge_base.persistence.v1.vector_store import VectorStore
@@ -199,11 +195,12 @@ class PerceptionAgent:
         tasks = [self._extract_from_chunk(chunk, entity_types) for chunk in chunks]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        entities = []
+        entities: list[ExtractedEntity] = []
         for result in results:
             if isinstance(result, Exception):
                 continue
-            entities.extend(result)
+            if isinstance(result, list):
+                entities.extend(result)
 
         return self._merge_cross_boundary_entities(entities)
 
@@ -222,15 +219,16 @@ class PerceptionAgent:
             Extracted entities from chunk.
         """
         system_prompt = self._get_perception_system_prompt(entity_types)
+        user_prompt = self._get_perception_user_prompt(chunk, entity_types)
 
         response = await self._gateway.complete(
-            prompt=evaluation_prompt,
-            system_prompt=EVALUATION_SYSTEM_PROMPT,
+            prompt=user_prompt,
+            system_prompt=system_prompt,
             temperature=0.3,
             json_mode=True,
         )
 
-        return self._parse_perception_response(response, chunk)
+        return self._parse_perception_response(response["content"], chunk)
 
     def _get_perception_system_prompt(self, entity_types: list[str]) -> str:
         """Get perception extraction system prompt."""
@@ -276,7 +274,7 @@ Be precise with character positions and prioritize extraction quality."""
         return f"""Extract named entities from the following text:
 
 ---TEXT START---
-{chunk.text}
+{str(getattr(chunk, "text", ""))}
 ---TEXT END---
 
 Entity Types: {", ".join(entity_types)}
@@ -302,7 +300,7 @@ Provide entity extractions in the specified JSON format. Include 50-100 characte
                     entity_type=item.get("type", "UNKNOWN"),
                     description=item.get("description"),
                     source_text=item.get("context", ""),
-                    chunk_id=chunk.id,
+                    chunk_id=cast(UUID, getattr(chunk, "id")),
                     confidence=item.get("confidence", 0.7),
                     extraction_phase=ExtractionPhase.PERCEPTION,
                     is_cross_boundary=item.get("boundary_type")
@@ -314,7 +312,26 @@ Provide entity extractions in the specified JSON format. Include 50-100 characte
                     "boundary_type": item.get("boundary_type"),
                 }
                 entities.append(entity)
-            except Exception:
+            except Exception as e:
+                # Log parsing error for this specific entity
+                from knowledge_base.intelligence.v1.extraction_logging import (
+                    get_ingestion_logger,
+                )
+
+                # Note: chunk_id is used to find existing logger if available
+                # or we just use a default one for now if logger is not passed
+                try:
+                    logger = get_ingestion_logger(
+                        chunk.document_id, f"doc_{chunk.document_id}"
+                    )
+                    logger.log_error(f"Failed to parse entity {item}: {e}")
+                except Exception:
+                    # Fallback to standard logging if ingestion logger fails
+                    import logging
+
+                    logging.getLogger(__name__).error(
+                        f"Failed to parse entity {item}: {e}"
+                    )
                 continue
 
         return entities
@@ -394,13 +411,13 @@ class EnhancementAgent:
         user_prompt = self._get_enhancement_user_prompt(entity, context)
 
         response = await self._gateway.complete(
-            prompt=enhancement_prompt,
-            system_prompt=ENHANCEMENT_SYSTEM_PROMPT,
+            prompt=user_prompt,
+            system_prompt=system_prompt,
             temperature=0.2,
             json_mode=True,
         )
 
-        return self._parse_enhancement_response(response, entity)
+        return self._parse_enhancement_response(response["content"], entity)
 
     def _get_enhancement_system_prompt(self) -> str:
         """Get entity enhancement system prompt."""
@@ -432,7 +449,7 @@ Output format (JSON):
         context: EnhancementContext,
     ) -> str:
         """Get enhancement user prompt."""
-        existing_names = [e.name for e in context.existing_entities[:10]]
+        existing_names = [str(e.name) for e in context.existing_entities[:10]]
         existing_str = "\n".join(existing_names) if existing_names else "None"
 
         return f"""Enhance the following extracted entity:
@@ -494,7 +511,7 @@ Provide enhancements in JSON format."""
 
             for existing in context.existing_entities:
                 if self._should_link(entity, existing):
-                    entity.linked_entities.append(existing.id)
+                    entity.linked_entities.append(cast(UUID, getattr(existing, "id")))
 
             linked_entities.append(entity)
 
@@ -502,7 +519,7 @@ Provide enhancements in JSON format."""
             for j, other in enumerate(linked_entities):
                 if i != j and self._should_link(entity, other):
                     if other.id not in entity.linked_entities:
-                        entity.linked_entities.append(other.id)
+                        entity.linked_entities.append(cast(UUID, getattr(other, "id")))
 
         return linked_entities
 
@@ -512,7 +529,8 @@ Provide enhancements in JSON format."""
         other: Entity | ExtractedEntity,
     ) -> bool:
         """Determine if two entities should be linked."""
-        name_similarity = self._calculate_name_similarity(entity.name, other.name)
+        other_name = str(getattr(other, "name", ""))
+        name_similarity = self._calculate_name_similarity(entity.name, other_name)
         type_match = entity.entity_type == getattr(other, "entity_type", None)
 
         return name_similarity > 0.85 or (type_match and name_similarity > 0.7)
@@ -572,19 +590,21 @@ class EvaluationAgent:
             entities[:sample_size] if sample_size < len(entities) else entities
         )
 
-        source_text = "\n".join(chunk.text for chunk in source_chunks[:5])
+        source_text = "\n".join(
+            str(getattr(chunk, "text", "")) for chunk in source_chunks[:5]
+        )
 
         system_prompt = self._get_evaluation_system_prompt()
         user_prompt = self._get_evaluation_user_prompt(sampled_entities, source_text)
 
         response = await self._gateway.complete(
-            prompt=perception_prompt,
-            system_prompt=SYSTEM_PROMPT,
+            prompt=user_prompt,
+            system_prompt=system_prompt,
             temperature=0.1,
             json_mode=True,
         )
 
-        return self._parse_evaluation_response(response, len(entities))
+        return self._parse_evaluation_response(response["content"], len(entities))
 
     def _get_evaluation_system_prompt(self) -> str:
         """Get evaluation system prompt."""

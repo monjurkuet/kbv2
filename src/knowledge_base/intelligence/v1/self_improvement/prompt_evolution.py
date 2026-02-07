@@ -4,10 +4,9 @@ Evolves extraction prompts through mutation, A/B testing, and selection
 to optimize performance for specific domains.
 """
 
-import asyncio
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -335,8 +334,11 @@ Output as JSON array:
                 prompt=mutation_prompt, temperature=self.config.mutation_temperature
             )
 
+            # Access content from dictionary response
+            prompt_content = response["content"]
+
             # Parse mutations
-            mutations_data = json.loads(response)
+            mutations_data = json.loads(prompt_content)
 
             variants = []
             for i, data in enumerate(mutations_data[:n_variants]):
@@ -351,8 +353,12 @@ Output as JSON array:
 
             return variants
 
-        except Exception as e:
-            print(f"Error generating mutations: {e}")
+        except (json.JSONDecodeError, KeyError, Exception) as e:
+            import logging
+
+            logging.getLogger(__name__).error(
+                f"Error generating mutations for domain {domain}: {e}"
+            )
             # Return empty list on failure
             return []
 
@@ -408,8 +414,20 @@ Output as JSON array:
 
                 results.append(result)
 
+            except (ValueError, KeyError, json.JSONDecodeError) as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Validation error evaluating document {doc.get('id')}: {e}"
+                )
+                continue
             except Exception as e:
-                print(f"Error evaluating document {doc.get('id')}: {e}")
+                import logging
+
+                logging.getLogger(__name__).error(
+                    f"Unexpected error evaluating document {doc.get('id')}: {e}",
+                    exc_info=True,
+                )
                 continue
 
         # Update variant metrics
@@ -451,12 +469,6 @@ Output as JSON array:
 
         # Select best variant
         best_variant = max(variants, key=lambda v: v.avg_quality_score)
-
-        # Check if improvement threshold met
-        current_best_score = max(
-            (v.avg_quality_score for v in variants if v.total_evaluations > 0),
-            default=0.0,
-        )
 
         # Generate next generation if needed
         if best_variant.generation < self.config.max_generations:
@@ -524,8 +536,8 @@ Output as JSON array:
         response = await self.gateway.complete(prompt=formatted_prompt, temperature=0.1)
 
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
+            return json.loads(response["content"])
+        except (json.JSONDecodeError, KeyError):
             return {"entities": [], "relationships": []}
 
     def _estimate_quality(

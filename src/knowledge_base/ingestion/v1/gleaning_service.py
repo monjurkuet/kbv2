@@ -454,13 +454,17 @@ class GleaningService:
                 temperature=0.0,
                 json_mode=True,
             )
+            # Handle AsyncLLMClient dict response
+            response_text = response["content"]
         except Exception as e:
-            logger.error(f"Failed to generate text for pass {pass_num}: {e}")
+            logger.error(
+                f"Failed to generate text for pass {pass_num}: {e}", exc_info=True
+            )
             return ExtractionResult()
 
-        logger.info(f"Completed pass {pass_num}, response length: {len(response)}")
+        logger.info(f"Completed pass {pass_num}, response length: {len(response_text)}")
 
-        return self._parse_extraction_result(response, text)
+        return self._parse_extraction_result(response_text, text)
 
     async def _guided_extraction_pass(
         self,
@@ -488,13 +492,16 @@ class GleaningService:
         for prompt in guided_prompts.prompts:
             try:
                 response = await self._gateway.complete(
-                    prompt=final_prompt,
-                    system_prompt=system_prompt,
+                    prompt=prompt.user_prompt,
+                    system_prompt=prompt.system_prompt,
                     temperature=0.0,
                     json_mode=True,
                 )
 
-                result = self._parse_extraction_result(response, text)
+                # Handle AsyncLLMClient dict response
+                response_text = response["content"]
+
+                result = self._parse_extraction_result(response_text, text)
                 all_results.append(result)
 
                 logger.info(
@@ -503,7 +510,8 @@ class GleaningService:
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed guided extraction for goal '{prompt.goal_name}': {e}"
+                    f"Failed guided extraction for goal '{prompt.goal_name}': {e}",
+                    exc_info=True,
                 )
 
         return self._merge_guided_results(all_results, guided_prompts.domain)

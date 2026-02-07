@@ -1,5 +1,5 @@
-"""Map-Reduce recursive summarization agent."""
-
+import json
+from typing import cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -97,7 +97,7 @@ class SynthesisAgent:
         edge_summaries = (
             self._prepare_edge_summaries(edges)
             if self._config.include_edge_fidelity
-            else []
+            else ""
         )
 
         system_prompt = self._get_micro_report_system_prompt()
@@ -114,7 +114,9 @@ class SynthesisAgent:
             max_tokens=self._config.max_tokens_per_report,
         )
 
-        return self._parse_micro_report(response, community.id, entities)
+        return self._parse_micro_report(
+            response["content"], cast(UUID, getattr(community, "id")), entities
+        )
 
     def _prepare_entity_summaries(self, entities: list[Entity]) -> str:
         """Prepare entity summaries for prompt.
@@ -218,7 +220,6 @@ Entities:
         Returns:
             Parsed micro-report.
         """
-        import json
 
         try:
             data = json.loads(response)
@@ -226,7 +227,7 @@ Entities:
             return MicroReport(
                 community_id=community_id,
                 summary=response,
-                key_entities=[e.name for e in entities],
+                key_entities=[str(e.name) for e in entities],
                 entity_count=len(entities),
                 key_relationships=[],
             )
@@ -234,7 +235,7 @@ Entities:
         return MicroReport(
             community_id=community_id,
             summary=data.get("summary", response),
-            key_entities=data.get("key_entities", [e.name for e in entities]),
+            key_entities=data.get("key_entities", [str(e.name) for e in entities]),
             entity_count=len(entities),
             key_relationships=data.get("key_relationships", []),
         )
@@ -276,7 +277,9 @@ Entities:
             max_tokens=self._config.max_tokens_per_report,
         )
 
-        return self._parse_macro_report(response, community.id, child_reports)
+        return self._parse_macro_report(
+            response["content"], cast(UUID, getattr(community, "id")), child_reports
+        )
 
     def _prepare_child_report_summaries(self, reports: list[MicroReport]) -> str:
         """Prepare child report summaries for prompt.
@@ -358,7 +361,6 @@ Child Community Reports:
         Returns:
             Parsed macro-report.
         """
-        import json
 
         try:
             data = json.loads(response)
@@ -412,17 +414,22 @@ Child Community Reports:
             report = await self.generate_micro_report(
                 community, community_entities, community_edges
             )
-            reports[community.id] = report
+            reports[cast(UUID, getattr(community, "id"))] = report
 
         for community in parent_communities:
             child_reports = [
-                reports[c.id]
+                reports[cast(UUID, getattr(c, "id"))]
                 for c in hierarchy.values()
-                if c.parent_id == community.id and c.id in reports
+                if c.parent_id == community.id
+                and cast(UUID, getattr(c, "id")) in reports
             ]
 
             if child_reports:
-                child_ids = {c.id for c in child_reports if isinstance(c, MicroReport)}
+                child_ids = {
+                    cast(UUID, getattr(c, "community_id"))
+                    for c in child_reports
+                    if isinstance(c, (MicroReport, MacroReport))
+                }
 
                 cross_edges = [
                     e
@@ -430,11 +437,12 @@ Child Community Reports:
                     if e.source_id in child_ids and e.target_id in child_ids
                 ]
 
-                report = await self.generate_macro_report(
+                # Correcting potential type clash in loop variable
+                macro_report = await self.generate_macro_report(
                     community,
                     [r for r in child_reports if isinstance(r, MicroReport)],
                     cross_edges,
                 )
-                reports[community.id] = report
+                reports[cast(UUID, getattr(community, "id"))] = macro_report
 
         return reports

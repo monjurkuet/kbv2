@@ -4,22 +4,17 @@ import asyncio
 import os
 import pytest
 import time
-from typing import Dict, List, Any
+from typing import Any
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime
 
-import httpx
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from knowledge_base.mcp_server import KBV2MCPProtocol, MCPRequest
 from knowledge_base.text_to_sql_agent import TextToSQLAgent
-from knowledge_base.common.resilient_gateway.gateway import (
-    ResilientGatewayClient,
-    ResilientGatewayConfig,
-)
+from knowledge_base.clients.llm import AsyncLLMClient
 from knowledge_base.intelligence.v1.resolution_agent import ResolutionAgent
 from knowledge_base.persistence.v1.vector_store import VectorStore
 from knowledge_base.common.temporal_utils import (
@@ -45,20 +40,8 @@ class TestRealWorldKBV2System:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup test environment with real infrastructure."""
-        self.config = ResilientGatewayConfig(
-            url=os.getenv("LLM_GATEWAY_URL", "http://localhost:8080"),
-            api_key=os.getenv("LLM_API_KEY", "test-key"),
-            model="gemini-2.5-flash-lite",
-            timeout=30,
-            circuit_breaker_failure_threshold=3,
-            circuit_breaker_recovery_timeout=10,
-            circuit_breaker_success_threshold=2,
-            retry_max_attempts=2,
-            retry_base_delay=1.0,
-            retry_max_delay=10.0,
-            model_switching_enabled=True,
-            fallback_models=["gemini-pro", "gemini-1.5-pro-latest"],
-        )
+        self.llm_url = os.getenv("LLM_GATEWAY_URL", "http://localhost:8080")
+        self.llm_model = "gemini-2.5-flash-lite"
 
         # Initialize with real database
         database_url = os.getenv(
@@ -85,7 +68,7 @@ class TestRealWorldKBV2System:
 
     async def async_setup(self):
         """Async setup for components."""
-        self.gateway = ResilientGatewayClient(self.config)
+        self.gateway = AsyncLLMClient()
         await self.vector_store.initialize()
 
         # Initialize MCP Protocol
@@ -137,7 +120,7 @@ class TestRealWorldKBV2System:
         await self.async_setup()
 
         async def make_concurrent_request(
-            request_data: Dict[str, Any], request_id: str
+            request_data: dict[str, Any], request_id: str
         ):
             """Make a single concurrent request."""
             request = MCPRequest(

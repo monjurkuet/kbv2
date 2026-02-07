@@ -29,10 +29,7 @@ async def test_entity_extraction():
         EntityPipelineService,
     )
     from knowledge_base.persistence.v1.vector_store import VectorStore
-    from knowledge_base.common.resilient_gateway import (
-        ResilientGatewayClient,
-        ResilientGatewayConfig,
-    )
+    from knowledge_base.clients.llm import AsyncLLMClient
     from knowledge_base.persistence.v1.schema import Document, Chunk
     from uuid import uuid4
 
@@ -44,10 +41,7 @@ async def test_entity_extraction():
     print("   ✅ Vector store initialized")
 
     # Initialize gateway
-    gateway_config = ResilientGatewayConfig(
-        continuous_rotation_enabled=True,
-    )
-    gateway = ResilientGatewayClient(config=gateway_config)
+    gateway = AsyncLLMClient()
     print("   ✅ Gateway initialized")
 
     # Initialize entity pipeline
@@ -75,7 +69,7 @@ async def test_entity_extraction():
         text=TEST_CONTENT,
         chunk_index=0,
     )
-    print(f"   ✅ Created chunk")
+    print("   ✅ Created chunk")
 
     # Extract entities
     print("\n🔍 Extracting entities...")
@@ -87,7 +81,7 @@ async def test_entity_extraction():
             use_multi_agent=True,
         )
 
-        print(f"\n✅ Entity extraction completed!")
+        print("\n✅ Entity extraction completed!")
         print(f"   📊 Entities found: {len(entities)}")
         print(f"   🔗 Edges found: {len(edges)}")
 

@@ -135,8 +135,16 @@ class SelfImprovingOrchestrator(IngestionOrchestrator):
         try:
             self._ontology_validator = OntologyValidator()
             logger.info("Ontology Validator initialized")
+        except (ValueError, ImportError, RuntimeError) as e:
+            logger.error(
+                f"Configuration error during Ontology Validator initialization: {e}"
+            )
+            self._enable_ontology_validation = False
         except Exception as e:
-            logger.error(f"Failed to initialize Ontology Validator: {e}")
+            logger.error(
+                f"Unexpected error during Ontology Validator initialization: {e}",
+                exc_info=True,
+            )
             self._enable_ontology_validation = False
 
     async def process_document(
