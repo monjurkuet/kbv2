@@ -6,10 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from knowledge_base.common.gateway import GatewayClient
-from knowledge_base.common.resilient_gateway import ResilientGatewayClient
-from knowledge_base.common.resilient_gateway import ResilientGatewayConfig
-from knowledge_base.config.constants import ROTATION_DELAY
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.intelligence.v1.adaptive_ingestion_engine import (
     AdaptiveIngestionEngine,
     PipelineRecommendation,
@@ -61,7 +58,7 @@ class IngestionOrchestrator:
 
             set_websocket_broadcast(log_broadcast)
         self._observability: Observability | None = None
-        self._gateway: GatewayClient | None = None
+        self._gateway: AsyncLLMClient | None = None
         self._vector_store: VectorStore | None = None
         self._adaptive_engine: AdaptiveIngestionEngine | None = None
         self._domain_service: DomainDetectionService | None = None
@@ -72,11 +69,7 @@ class IngestionOrchestrator:
     async def initialize(self) -> None:
         """Initialize all components - services only, no direct logic."""
         self._observability = Observability()
-        gateway_config = ResilientGatewayConfig(
-            continuous_rotation_enabled=True,
-            rotation_delay=ROTATION_DELAY,
-        )
-        self._gateway = ResilientGatewayClient(config=gateway_config)
+        self._gateway = AsyncLLMClient()
         self._vector_store = VectorStore()
 
         await self._vector_store.initialize()

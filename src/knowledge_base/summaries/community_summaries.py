@@ -21,6 +21,7 @@ class HierarchyLevel(str, Enum):
         MICRO: Specific entities within meso-level communities.
         NANO: Individual atomic entities in the knowledge graph.
     """
+
     MACRO = "macro"
     MESO = "meso"
     MICRO = "micro"
@@ -43,6 +44,7 @@ class CommunitySummary(BaseModel):
         coherence_score: Score indicating how coherent the community is (0.0-1.0).
         generated_at: Timestamp when this summary was generated.
     """
+
     community_id: str
     name: str
     level: HierarchyLevel
@@ -65,6 +67,7 @@ class CommunityNamingResult(BaseModel):
         key_themes: List of key themes identified in the community.
         confidence: Confidence score for the naming suggestion (0.0-1.0).
     """
+
     suggested_name: str
     description: str
     key_themes: List[str]
@@ -81,6 +84,7 @@ class MultiLevelSummary(BaseModel):
         micro_communities: List of micro-level community summaries.
         hierarchy_tree: Dictionary representing the hierarchy structure.
     """
+
     document_id: str
     macro_communities: List[CommunitySummary] = Field(default_factory=list)
     meso_communities: List[CommunitySummary] = Field(default_factory=list)
@@ -111,7 +115,7 @@ class CommunitySummarizer:
         communities: List[Dict[str, Any]],
         entities: List[Dict[str, Any]],
         edges: List[Dict[str, Any]],
-        document_id: str = ""
+        document_id: str = "",
     ) -> MultiLevelSummary:
         """Generate multi-level community summaries from entities and edges.
 
@@ -137,9 +141,15 @@ class CommunitySummarizer:
             community_entities, community_edges, communities
         )
 
-        await self._generate_community_names(macro_communities, level=HierarchyLevel.MACRO)
-        await self._generate_community_names(meso_communities, level=HierarchyLevel.MESO)
-        await self._generate_community_names(micro_communities, level=HierarchyLevel.MICRO)
+        await self._generate_community_names(
+            macro_communities, level=HierarchyLevel.MACRO
+        )
+        await self._generate_community_names(
+            meso_communities, level=HierarchyLevel.MESO
+        )
+        await self._generate_community_names(
+            micro_communities, level=HierarchyLevel.MICRO
+        )
 
         hierarchy_tree = self._build_hierarchy_tree(
             macro_communities, meso_communities, micro_communities
@@ -150,12 +160,11 @@ class CommunitySummarizer:
             macro_communities=macro_communities,
             meso_communities=meso_communities,
             micro_communities=micro_communities,
-            hierarchy_tree=hierarchy_tree
+            hierarchy_tree=hierarchy_tree,
         )
 
     def _group_entities_by_community(
-        self,
-        entities: List[Dict[str, Any]]
+        self, entities: List[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Group entities by their community ID.
 
@@ -174,8 +183,7 @@ class CommunitySummarizer:
         return grouped
 
     def _group_edges_by_community(
-        self,
-        edges: List[Dict[str, Any]]
+        self, edges: List[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Group edges by their associated community ID.
 
@@ -197,7 +205,7 @@ class CommunitySummarizer:
         self,
         community_entities: Dict[str, List[Dict[str, Any]]],
         community_edges: Dict[str, List[Dict[str, Any]]],
-        communities: List[Dict[str, Any]]
+        communities: List[Dict[str, Any]],
     ) -> List[CommunitySummary]:
         """Create macro-level communities representing high-level themes.
 
@@ -241,9 +249,11 @@ class CommunitySummarizer:
                 name=f"{theme_type} Cluster",
                 level=HierarchyLevel.MACRO,
                 summary=self._summarize_entities(type_ents),
-                key_entities=[e.get("name", "") for e in type_ents[:10] if e.get("name")],
+                key_entities=[
+                    e.get("name", "") for e in type_ents[:10] if e.get("name")
+                ],
                 key_relationships=key_rels,
-                entity_count=len(type_ents)
+                entity_count=len(type_ents),
             )
             macro_summaries.append(macro_summary)
 
@@ -253,7 +263,7 @@ class CommunitySummarizer:
         self,
         community_entities: Dict[str, List[Dict[str, Any]]],
         community_edges: Dict[str, List[Dict[str, Any]]],
-        communities: List[Dict[str, Any]]
+        communities: List[Dict[str, Any]],
     ) -> List[CommunitySummary]:
         """Create meso-level communities representing sub-topics.
 
@@ -275,20 +285,23 @@ class CommunitySummarizer:
                 continue
 
             edges_list = community_edges.get(comm_id, [])
-            key_rels = [f"{e.get('source', '')} -> {e.get('target', '')}" for e in edges_list[:5]]
+            key_rels = [
+                f"{e.get('source', '')} -> {e.get('target', '')}"
+                for e in edges_list[:5]
+            ]
 
             ent_names = [e.get("name", f"Entity-{j}") for j, e in enumerate(ents[:5])]
             entity_types = list(set(e.get("entity_type", "Unknown") for e in ents[:5]))
 
             meso_summary = CommunitySummary(
                 community_id=f"meso-{comm_id}",
-                name=f"Sub-topic {i+1}: {entity_types[0] if entity_types else 'Mixed'}",
+                name=f"Sub-topic {i + 1}: {entity_types[0] if entity_types else 'Mixed'}",
                 level=HierarchyLevel.MESO,
                 summary=self._summarize_entities(ents),
                 key_entities=ent_names,
                 key_relationships=key_rels,
                 parent_community_id=None,
-                entity_count=len(ents)
+                entity_count=len(ents),
             )
             meso_summaries.append(meso_summary)
 
@@ -298,7 +311,7 @@ class CommunitySummarizer:
         self,
         community_entities: Dict[str, List[Dict[str, Any]]],
         community_edges: Dict[str, List[Dict[str, Any]]],
-        communities: List[Dict[str, Any]]
+        communities: List[Dict[str, Any]],
     ) -> List[CommunitySummary]:
         """Create micro-level communities for specific entities.
 
@@ -323,11 +336,15 @@ class CommunitySummarizer:
 
                 edges_list = community_edges.get(comm_id, [])
                 related_edges = [
-                    e for e in edges_list
-                    if e.get("source") == entity.get("name") or e.get("target") == entity.get("name")
+                    e
+                    for e in edges_list
+                    if e.get("source") == entity.get("name")
+                    or e.get("target") == entity.get("name")
                 ]
                 related_entities = [
-                    e.get("target") if e.get("source") == entity.get("name") else e.get("source")
+                    e.get("target")
+                    if e.get("source") == entity.get("name")
+                    else e.get("source")
                     for e in related_edges[:3]
                 ]
 
@@ -335,20 +352,21 @@ class CommunitySummarizer:
                     community_id=f"micro-{entity_id}",
                     name=entity.get("name", f"Entity {entity_counter}"),
                     level=HierarchyLevel.MICRO,
-                    summary=entity.get("description", f"Entity of type {entity.get('entity_type', 'Unknown')}"),
+                    summary=entity.get(
+                        "description",
+                        f"Entity of type {entity.get('entity_type', 'Unknown')}",
+                    ),
                     key_entities=[entity.get("name", "")] if entity.get("name") else [],
                     key_relationships=related_entities,
                     entity_count=1,
-                    coherence_score=1.0
+                    coherence_score=1.0,
                 )
                 micro_summaries.append(micro_summary)
 
         return micro_summaries[:100]
 
     async def _generate_community_names(
-        self,
-        communities: List[CommunitySummary],
-        level: HierarchyLevel
+        self, communities: List[CommunitySummary], level: HierarchyLevel
     ) -> None:
         """Generate LLM-based names for communities.
 
@@ -362,7 +380,7 @@ class CommunitySummarizer:
         for community in communities:
             prompt = self._create_naming_prompt(community, level)
             try:
-                response = await self.llm.generate_text(prompt)
+                response = await self.llm.complete(prompt)
                 result = json.loads(response)
                 if result.get("name"):
                     community.name = result["name"]
@@ -372,9 +390,7 @@ class CommunitySummarizer:
                 pass
 
     def _create_naming_prompt(
-        self,
-        community: CommunitySummary,
-        level: HierarchyLevel
+        self, community: CommunitySummary, level: HierarchyLevel
     ) -> str:
         """Create a prompt for generating community names.
 
@@ -389,13 +405,13 @@ class CommunitySummarizer:
             HierarchyLevel.MACRO: "broad thematic category",
             HierarchyLevel.MESO: "sub-topic or theme",
             HierarchyLevel.MICRO: "specific entity or concept",
-            HierarchyLevel.NANO: "atomic entity"
+            HierarchyLevel.NANO: "atomic entity",
         }.get(level, "category")
 
         return f"""Generate a concise name (2-5 words) for this {level_desc}:
 
 Summary: {community.summary}
-Key entities: {', '.join(community.key_entities[:5])}
+Key entities: {", ".join(community.key_entities[:5])}
 Entity count: {community.entity_count}
 
 Respond with a JSON object with keys 'name' (string) and 'confidence' (number 0.0-1.0).
@@ -425,7 +441,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
         self,
         macro: List[CommunitySummary],
         meso: List[CommunitySummary],
-        micro: List[CommunitySummary]
+        micro: List[CommunitySummary],
     ) -> Dict[str, Any]:
         """Build hierarchy tree structure linking all levels.
 
@@ -439,13 +455,9 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
         """
         tree: Dict[str, Any] = {
             "type": "hierarchy",
-            "levels": {
-                "macro": len(macro),
-                "meso": len(meso),
-                "micro": len(micro)
-            },
+            "levels": {"macro": len(macro), "meso": len(meso), "micro": len(micro)},
             "nodes": {},
-            "edges": []
+            "edges": [],
         }
 
         for comm in macro:
@@ -453,7 +465,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
                 "name": comm.name,
                 "level": comm.level.value,
                 "children": [],
-                "entity_count": comm.entity_count
+                "entity_count": comm.entity_count,
             }
 
         macro_map: Dict[str, CommunitySummary] = {c.community_id: c for c in macro}
@@ -476,7 +488,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
                 "level": comm.level.value,
                 "parent": parent_id,
                 "children": [],
-                "entity_count": comm.entity_count
+                "entity_count": comm.entity_count,
             }
             if parent_id and parent_id in tree["nodes"]:
                 tree["nodes"][parent_id]["children"].append(comm.community_id)
@@ -500,7 +512,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
                 "level": comm.level.value,
                 "parent": parent_id,
                 "children": [],
-                "entity_count": comm.entity_count
+                "entity_count": comm.entity_count,
             }
             if parent_id and parent_id in tree["nodes"]:
                 tree["nodes"][parent_id]["children"].append(comm.community_id)
@@ -509,9 +521,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
         return tree
 
     def _calculate_parent_score(
-        self,
-        child: CommunitySummary,
-        parent: CommunitySummary
+        self, child: CommunitySummary, parent: CommunitySummary
     ) -> float:
         """Calculate a score for parent-child relationship.
 
@@ -532,9 +542,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
         return min(score, 1.0)
 
     def get_summary_by_level(
-        self,
-        summary: MultiLevelSummary,
-        level: HierarchyLevel
+        self, summary: MultiLevelSummary, level: HierarchyLevel
     ) -> List[CommunitySummary]:
         """Get communities at a specific hierarchy level.
 
@@ -553,9 +561,7 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
         return level_map.get(level, [])
 
     def get_community_path(
-        self,
-        summary: MultiLevelSummary,
-        community_id: str
+        self, summary: MultiLevelSummary, community_id: str
     ) -> List[CommunitySummary]:
         """Get the path from a community to the root.
 
@@ -567,9 +573,9 @@ Example: {{"name": "Machine Learning Systems", "confidence": 0.85}}"""
             List of communities from the given community to the root.
         """
         all_communities = (
-            summary.macro_communities +
-            summary.meso_communities +
-            summary.micro_communities
+            summary.macro_communities
+            + summary.meso_communities
+            + summary.micro_communities
         )
         comm_map = {c.community_id: c for c in all_communities}
 

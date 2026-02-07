@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.extraction.template_registry import (
     ExtractionGoal,
     TemplateRegistry,
@@ -58,7 +58,7 @@ class GuidedExtractor:
 
     def __init__(
         self,
-        llm_client: GatewayClient,
+        llm_client: AsyncLLMClient,
         template_registry: Optional[TemplateRegistry] = None,
     ) -> None:
         """Initialize guided extractor.
@@ -601,7 +601,7 @@ IMPORTANT: Respond with valid JSON only."""
 
         for prompt in sorted(prompts.prompts, key=lambda p: p.priority):
             try:
-                response = await self.llm.generate_text(
+                response = await self.llm.complete(
                     prompt=prompt.user_prompt,
                     system_prompt=prompt.system_prompt,
                     temperature=0.0,

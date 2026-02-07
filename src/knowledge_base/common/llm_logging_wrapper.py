@@ -18,7 +18,7 @@ def log_llm_call(agent_name: Optional[str] = None):
     Usage:
         @log_llm_call(agent_name="PerceptionAgent")
         async def my_method(self, ...):
-            return await self._gateway.chat_completion(...)
+            return await self._gateway.complete(...)
 
     Args:
         agent_name: Name of the agent making the call (for logging context)
@@ -42,9 +42,7 @@ def log_llm_call(agent_name: Optional[str] = None):
             call_args = []
 
             # Extract messages or prompt
-            messages = kwargs.get("messages") or (
-                args[1] if len(args) > 1 else None
-            )
+            messages = kwargs.get("messages") or (args[1] if len(args) > 1 else None)
             if messages:
                 call_args.append(f"messages={len(messages)} messages")
 
@@ -65,6 +63,7 @@ def log_llm_call(agent_name: Optional[str] = None):
 
             # Generate a call ID
             import uuid
+
             call_id = str(uuid.uuid4())[:8]
 
             # Log the call
@@ -85,7 +84,9 @@ def log_llm_call(agent_name: Optional[str] = None):
 
                 # Log the response
                 if hasattr(result, "choices") and result.choices:
-                    response_preview = str(result.choices[0].get("message", {}).get("content", ""))[:100]
+                    response_preview = str(
+                        result.choices[0].get("message", {}).get("content", "")
+                    )[:100]
                 else:
                     response_preview = str(result)[:100]
 

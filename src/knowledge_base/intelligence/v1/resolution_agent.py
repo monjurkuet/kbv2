@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.persistence.v1.schema import (
     EntityResolution,
     Entity,
@@ -43,7 +43,7 @@ class ResolutionAgent:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         vector_store: VectorStore,
         config: ResolutionConfig | None = None,
     ) -> None:
@@ -122,7 +122,7 @@ class ResolutionAgent:
 
         user_prompt = self._get_resolution_user_prompt(entity, candidates, source_text)
 
-        response = await self._gateway.generate_text(
+        response = await self._gateway.complete(
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.2,

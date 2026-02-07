@@ -6,8 +6,31 @@ from enum import Enum
 
 
 class Domain(str, Enum):
-    """Supported domains."""
+    """Cryptocurrency-focused domains."""
 
+    # Core Bitcoin domain
+    BITCOIN = "BITCOIN"
+
+    # Asset classes
+    DIGITAL_ASSETS = "DIGITAL_ASSETS"
+    STABLECOINS = "STABLECOINS"
+
+    # Infrastructure
+    BLOCKCHAIN_INFRA = "BLOCKCHAIN_INFRA"
+    DEFI = "DEFI"
+
+    # Market & Finance
+    CRYPTO_MARKETS = "CRYPTO_MARKETS"
+    INSTITUTIONAL_CRYPTO = "INSTITUTIONAL_CRYPTO"
+
+    # Regulatory & Legal
+    CRYPTO_REGULATION = "CRYPTO_REGULATION"
+
+    # Emerging
+    CRYPTO_AI = "CRYPTO_AI"
+    TOKENIZATION = "TOKENIZATION"
+
+    # Legacy domains (for backwards compatibility)
     TECHNOLOGY = "TECHNOLOGY"
     FINANCIAL = "FINANCIAL"
     MEDICAL = "MEDICAL"

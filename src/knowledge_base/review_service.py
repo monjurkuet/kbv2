@@ -18,7 +18,7 @@ from knowledge_base.intelligence import (
     EntityVerification,
     RiskLevel,
 )
-from knowledge_base.clients import create_llm_client
+from knowledge_base.common.resilient_gateway import ResilientGatewayClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,8 @@ class ReviewService:
         self._enable_hallucination_detection = enable_hallucination_detection
         if enable_hallucination_detection:
             self._hallucination_detector = HallucinationDetector()
-            self._llm_client = create_llm_client()
         else:
             self._hallucination_detector = None
-            self._llm_client = None
 
     def add_entity_for_review(
         self,

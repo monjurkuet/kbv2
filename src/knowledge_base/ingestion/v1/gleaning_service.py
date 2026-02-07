@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 import time
 from knowledge_base.common.temporal_utils import (
     TemporalClaim,
@@ -158,7 +158,7 @@ class GleaningService:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         config: GleaningConfig | None = None,
         guided_extractor: Optional[GuidedExtractor] = None,
     ) -> None:
@@ -448,7 +448,7 @@ class GleaningService:
             )
 
         try:
-            response = await self._gateway.generate_text(
+            response = await self._gateway.complete(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=0.0,
@@ -487,9 +487,9 @@ class GleaningService:
         all_results = []
         for prompt in guided_prompts.prompts:
             try:
-                response = await self._gateway.generate_text(
-                    prompt=prompt.user_prompt,
-                    system_prompt=prompt.system_prompt,
+                response = await self._gateway.complete(
+                    prompt=final_prompt,
+                    system_prompt=system_prompt,
                     temperature=0.0,
                     json_mode=True,
                 )

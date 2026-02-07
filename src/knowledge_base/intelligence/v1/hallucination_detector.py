@@ -11,16 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from knowledge_base.common.resilient_gateway import (
-    ResilientGatewayClient,
-    ResilientGatewayConfig,
-)
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.config.constants import (
-    DEFAULT_LLM_MODEL,
     HALLUCINATION_THRESHOLD,
-    LLM_GATEWAY_URL,
     DEFAULT_BATCH_SIZE,
-    MAX_RETRIES,
 )
 
 
@@ -83,11 +77,9 @@ class HallucinationDetectorConfig(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    gateway_client: ResilientGatewayClient | None = Field(
-        default=None, description="Resilient gateway client instance"
+    gateway_client: AsyncLLMClient | None = Field(
+        default=None, description="Async LLM client instance"
     )
-    url: str = Field(default=LLM_GATEWAY_URL, description="LLM gateway URL")
-    model: str = Field(default=DEFAULT_LLM_MODEL, description="Model name")
     temperature: float = Field(default=0.1, description="Temperature for verification")
     max_tokens: int = Field(default=1024, description="Max tokens for verification")
     batch_size: int = Field(
@@ -112,20 +104,14 @@ class HallucinationDetector:
         self._config = config or HallucinationDetectorConfig()
         self._gateway_client = self._config.gateway_client
 
-    async def _get_gateway_client(self) -> ResilientGatewayClient:
-        """Get or create resilient gateway client.
+    async def _get_gateway_client(self) -> AsyncLLMClient:
+        """Get or create async LLM client.
 
         Returns:
-            Resilient gateway client instance.
+            Async LLM client instance.
         """
         if self._gateway_client is None:
-            gateway_config = ResilientGatewayConfig(
-                url=self._config.url,
-                model=self._config.model,
-                temperature=self._config.temperature,
-                max_tokens=self._config.max_tokens,
-            )
-            self._gateway_client = ResilientGatewayClient(gateway_config)
+            self._gateway_client = AsyncLLMClient()
         return self._gateway_client
 
     async def verify_attribute(
@@ -179,10 +165,9 @@ Respond with JSON only:
 }}"""
 
         try:
-            response_text = await client.generate_text(
+            response_text = await client.complete(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
-                json_mode=True,
                 temperature=self._config.temperature,
                 max_tokens=self._config.max_tokens,
             )
@@ -412,7 +397,7 @@ Respond with JSON only:
         Returns:
             Dictionary with verification results.
         """
-        client = await self._get_llm_client()
+        client = await self._get_gateway_client()
 
         system_prompt = """You are a factual verification expert. Evaluate whether the claim
 is supported by the evidence. Respond with:
@@ -471,7 +456,7 @@ Respond with JSON:
         Returns:
             Comparison results.
         """
-        client = await self._get_llm_client()
+        client = await self._get_gateway_client()
 
         primary_str = json.dumps(primary_entity, indent=2)
         secondary_str = json.dumps(secondary_entity, indent=2)

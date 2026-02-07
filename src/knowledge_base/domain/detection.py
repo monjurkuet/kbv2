@@ -207,7 +207,7 @@ Text to analyze (first 1000 chars):
 Respond with JSON with keys: domain (string), confidence (0.0-1.0), reasoning (string)"""
 
         try:
-            response = await self.llm.generate_text(prompt)
+            response = await self.llm.complete(prompt)
 
             import json
 

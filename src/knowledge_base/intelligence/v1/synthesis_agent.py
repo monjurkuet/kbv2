@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.persistence.v1.schema import Community, Edge, Entity
 
 
@@ -35,7 +35,7 @@ class MicroReport(BaseModel):
         """Ensure all items in lists are strings."""
         if not isinstance(v, list):
             return v
-        
+
         processed = []
         for item in v:
             if isinstance(item, dict):
@@ -65,7 +65,7 @@ class SynthesisAgent:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         config: SynthesisConfig | None = None,
     ) -> None:
         """Initialize synthesis agent.
@@ -107,7 +107,7 @@ class SynthesisAgent:
             edge_summaries,
         )
 
-        response = await self._gateway.generate_text(
+        response = await self._gateway.complete(
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
@@ -269,7 +269,7 @@ Entities:
             edge_summaries,
         )
 
-        response = await self._gateway.generate_text(
+        response = await self._gateway.complete(
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.4,

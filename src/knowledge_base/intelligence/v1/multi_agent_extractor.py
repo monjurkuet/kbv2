@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.intelligence.v1.extraction_logging import (
     get_ingestion_logger,
 )
@@ -158,7 +158,7 @@ class PerceptionAgent:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         config: MultiAgentExtractorConfig | None = None,
     ) -> None:
         """Initialize perception agent.
@@ -223,10 +223,11 @@ class PerceptionAgent:
         """
         system_prompt = self._get_perception_system_prompt(entity_types)
 
-        response = await self._gateway.generate_text(
-            prompt=self._get_perception_user_prompt(chunk, entity_types),
-            system_prompt=system_prompt,
-            temperature=self._config.perception_temperature,
+        response = await self._gateway.complete(
+            prompt=evaluation_prompt,
+            system_prompt=EVALUATION_SYSTEM_PROMPT,
+            temperature=0.3,
+            json_mode=True,
         )
 
         return self._parse_perception_response(response, chunk)
@@ -341,7 +342,7 @@ class EnhancementAgent:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         graph_store: GraphStore,
         vector_store: VectorStore,
         config: MultiAgentExtractorConfig | None = None,
@@ -392,10 +393,11 @@ class EnhancementAgent:
         system_prompt = self._get_enhancement_system_prompt()
         user_prompt = self._get_enhancement_user_prompt(entity, context)
 
-        response = await self._gateway.generate_text(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=self._config.enhancement_temperature,
+        response = await self._gateway.complete(
+            prompt=enhancement_prompt,
+            system_prompt=ENHANCEMENT_SYSTEM_PROMPT,
+            temperature=0.2,
+            json_mode=True,
         )
 
         return self._parse_enhancement_response(response, entity)
@@ -534,7 +536,7 @@ class EvaluationAgent:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         config: MultiAgentExtractorConfig | None = None,
     ) -> None:
         """Initialize evaluation agent.
@@ -575,10 +577,11 @@ class EvaluationAgent:
         system_prompt = self._get_evaluation_system_prompt()
         user_prompt = self._get_evaluation_user_prompt(sampled_entities, source_text)
 
-        response = await self._gateway.generate_text(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=self._config.evaluation_temperature,
+        response = await self._gateway.complete(
+            prompt=perception_prompt,
+            system_prompt=SYSTEM_PROMPT,
+            temperature=0.1,
+            json_mode=True,
         )
 
         return self._parse_evaluation_response(response, len(entities))
@@ -740,7 +743,7 @@ class ManagerAgent:
 
             logger.log_stage_complete(
                 "Perception Phase",
-                f"Extracted {len(state.perception_entities)} entities"
+                f"Extracted {len(state.perception_entities)} entities",
             )
 
             # Phase 2: Enhancement
@@ -748,8 +751,7 @@ class ManagerAgent:
             state = await self._run_enhancement_phase(state)
 
             logger.log_stage_complete(
-                "Enhancement Phase",
-                f"Enhanced {len(state.enhanced_entities)} entities"
+                "Enhancement Phase", f"Enhanced {len(state.enhanced_entities)} entities"
             )
 
             # Phase 3: Evaluation
@@ -758,12 +760,12 @@ class ManagerAgent:
 
             logger.log_stage_complete(
                 "Evaluation Phase",
-                f"Quality score: {getattr(state, 'quality_score', 'N/A')}"
+                f"Quality score: {getattr(state, 'quality_score', 'N/A')}",
             )
 
             logger.log_stage_complete(
                 "Multi-Agent Extraction Workflow",
-                f"Total entities: {len(getattr(state, 'enhanced_entities', []))}"
+                f"Total entities: {len(getattr(state, 'enhanced_entities', []))}",
             )
 
         except Exception as e:
@@ -861,7 +863,7 @@ class EntityExtractionManager:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         graph_store: GraphStore,
         vector_store: VectorStore,
         config: MultiAgentExtractorConfig | None = None,

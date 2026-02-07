@@ -9,7 +9,7 @@ from typing import Any, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.common.llm_logging_wrapper import (
     LLMCallLogger,
     log_llm_result,
@@ -58,7 +58,7 @@ class PipelineRecommendation(BaseModel):
 class AdaptiveIngestionEngine:
     """Engine that uses LLM to optimize ingestion pipeline."""
 
-    def __init__(self, gateway: GatewayClient):
+    def __init__(self, gateway: AsyncLLMClient):
         """Initialize adaptive engine.
 
         Args:
@@ -86,7 +86,9 @@ class AdaptiveIngestionEngine:
         # Sample first 2000 chars for analysis (avoid token limits)
         sample_text = document_text[:2000]
         if len(document_text) > 2000:
-            sample_text += f"\n\n...[Document truncated, total size: {file_size_bytes} bytes]"
+            sample_text += (
+                f"\n\n...[Document truncated, total size: {file_size_bytes} bytes]"
+            )
 
         prompt = f"""You are an expert document processing system. Analyze this document and recommend optimal processing parameters.
 
@@ -134,8 +136,8 @@ Respond with ONLY the JSON, no markdown or explanations."""
                 document_id=document_name,
                 step_info="Analysis Phase",
             ):
-                response = await self._gateway.chat_completion(
-                    messages=[{"role": "user", "content": prompt}],
+                response = await self._gateway.complete(
+                    prompt=prompt,
                     temperature=0.1,  # Deterministic for consistency
                 )
 
@@ -161,23 +163,31 @@ Respond with ONLY the JSON, no markdown or explanations."""
             except json.JSONDecodeError:
                 # Clean thought/reasoning tags if present (e.g., <think> or <thought>)
                 import re
-                
+
                 # Strip anything between <thought>...</thought> or <think>...</think>
-                cleaned_content = re.sub(r"<(thought|think)>.*?</\1>", "", content, flags=re.DOTALL)
-                
+                cleaned_content = re.sub(
+                    r"<(thought|think)>.*?</\1>", "", content, flags=re.DOTALL
+                )
+
                 # Strip remaining opening/closing tags if they were unclosed
-                cleaned_content = re.sub(r"<(thought|think)>.*", "", cleaned_content, flags=re.DOTALL)
-                
+                cleaned_content = re.sub(
+                    r"<(thought|think)>.*", "", cleaned_content, flags=re.DOTALL
+                )
+
                 # Extract JSON from markdown blocks if present
-                json_blocks = re.findall(r"```json\s*(.*?)\s*```", cleaned_content, re.DOTALL)
+                json_blocks = re.findall(
+                    r"```json\s*(.*?)\s*```", cleaned_content, re.DOTALL
+                )
                 if json_blocks:
                     cleaned_content = json_blocks[0]
                 else:
                     # Try general code blocks
-                    code_blocks = re.findall(r"```\s*(.*?)\s*```", cleaned_content, re.DOTALL)
+                    code_blocks = re.findall(
+                        r"```\s*(.*?)\s*```", cleaned_content, re.DOTALL
+                    )
                     if code_blocks:
                         cleaned_content = code_blocks[0]
-                
+
                 # Final attempt to find anything that looks like a JSON object
                 if not json_blocks and not code_blocks:
                     # Look for first { and last }
@@ -185,12 +195,14 @@ Respond with ONLY the JSON, no markdown or explanations."""
                     end = cleaned_content.rfind("}")
                     if start != -1 and end != -1:
                         cleaned_content = cleaned_content[start : end + 1]
-                
+
                 cleaned_content = cleaned_content.strip()
                 try:
                     json_match = json.loads(cleaned_content)
                 except json.JSONDecodeError as decode_err:
-                    logger.error(f"Failed to parse LLM response after cleaning: {cleaned_content[:200]}...")
+                    logger.error(
+                        f"Failed to parse LLM response after cleaning: {cleaned_content[:200]}..."
+                    )
                     raise decode_err
 
             recommendation = PipelineRecommendation(
@@ -277,7 +289,11 @@ Respond with ONLY the JSON, no markdown or explanations."""
 
         else:  # MULTI_AGENT
             # Perception + Enhancement (iterative) + Evaluation per chunk
-            chunks = max(1, (recommendation.expected_entity_count * 50) // recommendation.chunk_size)
+            chunks = max(
+                1,
+                (recommendation.expected_entity_count * 50)
+                // recommendation.chunk_size,
+            )
             calls_per_chunk = (
                 1  # Perception
                 + recommendation.max_enhancement_iterations  # Enhancement iterations

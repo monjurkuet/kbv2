@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from knowledge_base.common.gateway import GatewayClient
+from knowledge_base.clients import AsyncLLMClient
 from knowledge_base.common.llm_logging_wrapper import (
     LLMCallLogger,
     log_llm_result,
@@ -362,7 +362,7 @@ class EntityTyper:
 
     def __init__(
         self,
-        gateway: GatewayClient,
+        gateway: AsyncLLMClient,
         config: EntityTypingConfig | None = None,
     ) -> None:
         """Initialize entity typer.
@@ -468,7 +468,7 @@ class EntityTyper:
             document_id=str(entity.entity_id),
             step_info=f"Type determination",
         ):
-            response = await self._gateway.generate_text(
+            response = await self._gateway.complete(
                 prompt=user_prompt,
                 system_prompt=template.system_prompt,
                 temperature=self._config.temperature,

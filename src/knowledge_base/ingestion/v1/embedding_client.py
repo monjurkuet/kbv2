@@ -1,163 +1,77 @@
+"""Async embedding client using OpenAI SDK.
+
+Uses AsyncOpenAI with Ollama-compatible endpoint for bge-m3 embeddings.
+
+Environment Variables:
+- EMBEDDING_API_BASE: API base URL (default: http://localhost:11434/v1)
+- EMBEDDING_API_KEY: API key (default: sk-dummy)
+"""
+
 import asyncio
-import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
-import httpx
-from pydantic import BaseModel, Field, field_validator
+from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
-
-from knowledge_base.config.constants import (
-    EMBEDDING_URL,
-    DEFAULT_LLM_TIMEOUT,
-    MAX_RETRIES,
-    MAX_CONCURRENT_REQUESTS,
-)
-
 
 logger = logging.getLogger(__name__)
 
+# Default configuration
+DEFAULT_EMBEDDING_MODEL = "bge-m3"
+DEFAULT_EMBEDDING_DIMENSIONS = 1024
 
-class EmbeddingConfig(BaseSettings):
-    """Embedding configuration."""
+
+class EmbeddingConfig(BaseModel):
+    """Embedding configuration for EmbeddingClient."""
 
     model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
 
-    embedding_url: str = EMBEDDING_URL
-    embedding_model: str = "bge-m3"  # Use bge-m3 for multilingual support
-    dimensions: int = 1024  # bge-m3 dimension size
-
-    @field_validator("embedding_url")
-    @classmethod
-    def strip_whitespace(cls, v: str) -> str:
-        """Strip whitespace including \r and \n from URL."""
-        return v.strip()
-
-    @classmethod
-    def for_model(
-        cls, model_name: str = "bge-m3", url: str = EMBEDDING_URL
-    ) -> "EmbeddingConfig":
-        """Create config for bge-m3 model with 1024 dimensions."""
-        # Always use bge-m3 with 1024 dimensions
-        if model_name != "bge-m3":
-            logger.warning(f"Model {model_name} not supported, using bge-m3")
-            model_name = "bge-m3"
-
-        return cls(
-            embedding_url=url,
-            embedding_model=model_name,
-            # Use 1024 dimensions for bge-m3 (matches database schema)
-            dimensions=1024,
-        )
-
-
-EMBEDDING_CONFIGS: Dict[str, Dict[str, Any]] = {
-    # Only bge-m3 is supported - 1024 dimensions
-    "default": {"model": "bge-m3", "dimensions": 1024, "max_tokens": 8191},
-    "bge_m3": {"model": "bge-m3", "dimensions": 1024, "max_tokens": 8191},
-}
+    embedding_url: str = Field(default="http://localhost:11434")
+    embedding_model: str = Field(default="bge-m3")
+    dimensions: int = Field(default=1024)
 
 
 class EmbeddingClient:
-    """Client for generating text embeddings using Ollama.
+    """Async embedding client using OpenAI SDK.
 
-    This client provides async methods for embedding single texts or batches
-    of texts using the Ollama embeddings API. Supports configurable dimension
-    truncation for optimized storage and retrieval.
-
-    Attributes:
-        _config: Configuration settings for the embedding service.
-        _client: Async HTTP client for API requests.
+    Compatible with Ollama running bge-m3 model.
     """
 
-    def __init__(self, config: EmbeddingConfig | None = None) -> None:
-        """Initialize embedding client.
+    def __init__(
+        self,
+        config: Optional[EmbeddingConfig] = None,
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> None:
+        """Initialize the embedding client.
 
         Args:
-            config: Embedding configuration.
+            config: EmbeddingConfig object.
+            model: Embedding model name (default: bge-m3).
+            dimensions: Embedding dimensions (default: 1024 for bge-m3).
+            base_url: API base URL. Defaults to EMBEDDING_API_BASE env var.
+            api_key: API key. Defaults to EMBEDDING_API_KEY env var.
         """
-        self._config = config or EmbeddingConfig()
-        self._client: httpx.AsyncClient | None = None
-        self._dimensions = self._config.dimensions  # Database dimension size (2048)
-        self._max_tokens = self._embedding_config["max_tokens"]
-        self._max_retries = 3
-        self._retry_exceptions = (
-            httpx.RequestError,
-            httpx.TimeoutException,
-            httpx.ConnectError,
+        if config:
+            self.model = config.embedding_model
+            self.dimensions = config.dimensions
+            base_url = config.embedding_url
+        else:
+            self.model = model or DEFAULT_EMBEDDING_MODEL
+            self.dimensions = dimensions or DEFAULT_EMBEDDING_DIMENSIONS
+
+        self._client = AsyncOpenAI(
+            base_url=base_url
+            or os.getenv("EMBEDDING_API_BASE", "http://localhost:11434/v1"),
+            api_key=api_key or os.getenv("EMBEDDING_API_KEY", "sk-dummy"),
         )
 
-    @property
-    def _embedding_config(self) -> dict[str, Any]:
-        """Get embedding config for current model."""
-        return EMBEDDING_CONFIGS.get("default")
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client.
-
-        Returns:
-            Async HTTP client.
-        """
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                timeout=DEFAULT_LLM_TIMEOUT,
-                follow_redirects=True,
-            )
-        return self._client
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(
-            (httpx.RequestError, httpx.TimeoutException, httpx.ConnectError)
-        ),
-    )
-    async def _embed_with_retry(
-        self,
-        text: str,
-        extra_params: Optional[Dict[str, Any]] = None,
-    ) -> List[float]:
-        """Embed a single text with automatic retry on transient failures."""
-        client = await self._get_client()
-        request_body: Dict[str, Any] = {
-            "model": self._config.embedding_model,
-            "input": text,  # Use 'input' not 'prompt' for /api/embed endpoint
-        }
-        if extra_params:
-            request_body.update(extra_params)
-
-        response = await client.post(
-            f"{self._config.embedding_url}/api/embed",  # Use /api/embed endpoint
-            headers={"Content-Type": "application/json"},
-            json=request_body,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        # Ollama /api/embed returns "embeddings" (plural) as an array
-        embeddings = data.get("embeddings", [])
-        if not embeddings or not isinstance(embeddings, list) or len(embeddings) == 0:
-            raise ValueError(f"No embeddings in response for text: {text[:50]}...")
-
-        # Get the first (and only) embedding from the array
-        embedding = embeddings[0]
-        if not embedding:
-            raise ValueError(f"Empty embedding in response for text: {text[:50]}...")
-
-        return [float(x) for x in embedding]
-
-    async def embed_text(
-        self,
-        text: str,
-    ) -> list[float]:
-        """Embed single text.
+    async def embed_text(self, text: str) -> List[float]:
+        """Embed a single text.
 
         Args:
             text: Text to embed.
@@ -165,17 +79,17 @@ class EmbeddingClient:
         Returns:
             Embedding vector.
         """
-        result = await self.embed_batch([text])
-        return result[0]
+        response = await self._client.embeddings.create(
+            model=self.model,
+            input=[text],
+        )
+        return response.data[0].embedding
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-    ) -> list[list[float]]:
-        """Embed multiple texts using Ollama in parallel.
+    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """Embed multiple texts in a single API call.
 
         Args:
-            texts: Texts to embed.
+            texts: List of texts to embed.
 
         Returns:
             List of embedding vectors.
@@ -183,35 +97,11 @@ class EmbeddingClient:
         if not texts:
             return []
 
-        # Use a semaphore to limit concurrency to avoid overwhelming Ollama
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS * 2)
-
-        async def _embed_safe(text: str) -> list[float]:
-            async with semaphore:
-                try:
-                    # Clean text to remove non-printable characters
-                    clean_text = text.replace("\r", "").replace("\n", " ").strip()
-                    if not clean_text:
-                        return [0.0] * self._dimensions
-
-                    embedding = await self._embed_with_retry(clean_text)
-
-                    # bge-m3 produces exactly 1024 dimensions
-                    if len(embedding) != self._dimensions:
-                        logger.warning(
-                            f"Embedding dimension mismatch: expected {self._dimensions}, got {len(embedding)}"
-                        )
-
-                    return embedding
-                except Exception as e:
-                    logger.error(f"Failed to embed text: {e}")
-                    return [0.0] * self._dimensions
-
-        # Execute all tasks in parallel
-        tasks = [_embed_safe(text) for text in texts]
-        all_embeddings = await asyncio.gather(*tasks)
-
-        return list(all_embeddings)
+        response = await self._client.embeddings.create(
+            model=self.model,
+            input=texts,
+        )
+        return [data.embedding for data in response.data]
 
     async def embed_texts(
         self,
@@ -219,15 +109,12 @@ class EmbeddingClient:
         dimensions: Optional[int] = None,
         batch_size: int = 100,
     ) -> List[List[float]]:
-        """Embed multiple texts using bge-m3.
-
-        Processes a list of texts in batches and returns their embedding vectors.
-        Always uses 1024 dimensions for bge-m3 model.
+        """Embed multiple texts with batching.
 
         Args:
             texts: List of texts to embed.
-            dimensions: Kept for API compatibility, but always uses 1024.
-            batch_size: Number of texts to process per API call.
+            dimensions: Ignored (always uses bge-m3 with 1024 dims).
+            batch_size: Number of texts per API call.
 
         Returns:
             List of embedding vectors (each 1024 dimensions).
@@ -235,7 +122,6 @@ class EmbeddingClient:
         if not texts:
             return []
 
-        # Ignore dimensions parameter, always use bge-m3 with 1024 dims
         all_embeddings: List[List[float]] = []
 
         for i in range(0, len(texts), batch_size):
@@ -245,46 +131,77 @@ class EmbeddingClient:
 
         return all_embeddings
 
-    def get_embedding_info(self) -> Dict[str, Any]:
-        """Get information about the embedding configuration.
+    def get_info(self) -> Dict[str, Any]:
+        """Get embedding configuration info.
 
         Returns:
-            Dictionary containing model, dimensions, and max tokens.
+            Dict with model, dimensions, and max_tokens.
         """
         return {
-            "model": self._config.embedding_model,
-            "dimensions": self._dimensions,
+            "model": self.model,
+            "dimensions": self.dimensions,
             "max_tokens": 8191,
-            "database_dimensions": self._dimensions,
         }
 
     async def close(self) -> None:
-        """Close HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        """Close the async client."""
+        await self._client.close()
+
+    async def __aenter__(self) -> "EmbeddingClient":
+        """Enter async context.
+
+        Returns:
+            Self.
+        """
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context."""
+        await self.close()
 
 
-async def test_embedding():
-    """Test the embedding functionality."""
+# Singleton instance
+_embedding_client: EmbeddingClient | None = None
+
+
+def get_embedding_client() -> EmbeddingClient:
+    """Get or create singleton embedding client.
+
+    Returns:
+        EmbeddingClient instance.
+    """
+    global _embedding_client
+    if _embedding_client is None:
+        _embedding_client = EmbeddingClient()
+    return _embedding_client
+
+
+async def test_embedding_client() -> None:
+    """Test the embedding client functionality."""
     try:
         client = EmbeddingClient()
-        test_text = "This is a test sentence for embedding."
 
-        logger.info(f"Testing embedding with text: {test_text}")
-        logger.info(f"Model: {client._config.embedding_model}")
-        logger.info(f"Database dimensions: {client._dimensions}")
+        # Test single embedding
+        embedding = await client.embed_text("Test embedding")
+        print(f"✅ Single embedding: {len(embedding)} dimensions")
 
-        embedding = await client.embed_text(test_text)
-        logger.info(f"Success! Embedding vector length: {len(embedding)}")
-        logger.debug(f"Sample values: {embedding[:5]}")
+        # Test batch embedding
+        embeddings = await client.embed_batch(["Test 1", "Test 2", "Test 3"])
+        print(
+            f"✅ Batch embeddings: {len(embeddings)} vectors, {len(embeddings[0])} dims"
+        )
+
+        info = client.get_info()
+        print(f"✅ Model info: {info}")
 
         await client.close()
+        print("✅ Embedding client test passed!")
+
     except Exception as e:
-        logger.error(f"Error during embedding test: {e}", exc_info=True)
+        print(f"❌ Embedding client test failed: {e}")
 
 
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(test_embedding())
+    asyncio.run(test_embedding_client())
