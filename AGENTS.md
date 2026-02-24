@@ -1,16 +1,26 @@
-## Must follow rules 
-- No CI/CD required.
-- Always use openai compatible api http://localhost:8087/v1/ for LLM
-- Always use http://localhost:11434/ endpoint for embedding. 1024 vector, bge-m3
-- Always use uv for python.
-- Clean slate, production-ready architecture only. Don't need to maintain compatibility, don't need gradual migration.
+## Must Follow Rules
 
-# environment variables 
----
-DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
-LLM_API_BASE=http://localhost:8087/v1
-LLM_API_KEY=sk-dummy
-EMBEDDING_API_BASE=http://localhost:11434
+- No CI/CD required
+- Always use OpenAI-compatible API `http://localhost:8087/v1/` for LLM
+- Always use `http://localhost:11434/` for embeddings (bge-m3, 1024 dims)
+- Always use `uv` for Python
+- Clean slate, production-ready architecture only
+- No backwards compatibility needed, no gradual migration
+
+## Configuration
+
+- **`config.yaml`** - All non-secret settings
+- **`.env`** - Secrets only (API keys)
+
+## Storage
+
+Portable databases in `data/` directory:
+- **SQLite** (`kbv2.db`) - Documents + FTS5
+- **ChromaDB** (`chroma/`) - Vector store
+- **Kuzu** (`kuzu/`) - Knowledge graph
+
+**No external database servers required.**
+
 ---
 
-add environment variables here if necessary which are used.
+> **See [CLAUDE.md](CLAUDE.md) for comprehensive development guidelines.**

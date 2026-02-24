@@ -1,6 +1,6 @@
 """Processing module for batch operations and embeddings."""
 
-from src.knowledge_base.processing.batch_processor import (
+from .batch_processor import (
     BatchConfig,
     BatchProcessor,
     BatchResult,

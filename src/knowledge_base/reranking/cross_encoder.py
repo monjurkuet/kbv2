@@ -16,7 +16,7 @@ import logging
 from sentence_transformers import CrossEncoder
 from pydantic import BaseModel, Field
 
-from knowledge_base.storage.hybrid_search import HybridSearchResult
+from knowledge_base.storage.portable.hybrid_search import HybridSearchResult
 
 
 logger = logging.getLogger(__name__)

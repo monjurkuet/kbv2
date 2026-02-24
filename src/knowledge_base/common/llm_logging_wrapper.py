@@ -3,13 +3,11 @@
 import functools
 import logging
 import time
+import uuid
 from typing import Any, Callable, Optional
 
-# Import the consolidated logger from extraction_logging
-from knowledge_base.intelligence.v1.extraction_logging import ingestion_logger
-
-# Use the consolidated logger for all LLM call logging
-llm_call_logger = ingestion_logger
+# Create a dedicated logger for LLM calls
+llm_call_logger = logging.getLogger("kbv2.llm_calls")
 
 
 def log_llm_call(agent_name: Optional[str] = None):
@@ -62,8 +60,6 @@ def log_llm_call(agent_name: Optional[str] = None):
             call_signature = ", ".join(call_args)
 
             # Generate a call ID
-            import uuid
-
             call_id = str(uuid.uuid4())[:8]
 
             # Log the call
@@ -141,8 +137,6 @@ class LLMCallLogger:
 
     async def __aenter__(self):
         """Enter context - log the LLM call."""
-        import uuid
-
         self.call_id = str(uuid.uuid4())[:8]
         self.start_time = time.time()
 

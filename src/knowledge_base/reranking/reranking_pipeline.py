@@ -10,7 +10,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from knowledge_base.storage.hybrid_search import HybridSearchEngine, HybridSearchResult
+from knowledge_base.storage.portable.hybrid_search import HybridSearchEngine, HybridSearchResult
 from knowledge_base.reranking.cross_encoder import (
     CrossEncoderReranker,
     RerankedSearchResult,

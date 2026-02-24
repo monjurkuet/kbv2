@@ -1,22 +1,17 @@
-# Agentic Knowledge Ingestion & Management System
+# KBV2 - Portable Knowledge Base System
 
-A high-fidelity information extraction engine that transforms unstructured data into a structured, temporally-aware knowledge graph.
+A high-fidelity information extraction engine that transforms unstructured documents into a structured, temporally-aware knowledge graph using adaptive AI extraction.
 
 ## Key Features
 
-- **Adaptive Extraction:** 2-pass density-aware extraction with document complexity analysis
-- **Verbatim-Grounded Entity Resolution:** Dedupes similar entities with mandatory citations
-- **Hierarchical Leiden Clustering:** Macro and micro community detection
-- **Map-Reduce Recursive Summarization:** Intelligence reports with edge fidelity
-- **Temporal Information Extraction:** ISO-8601 normalized temporal claims
-- **Natural Language Query Interface:** Translate queries to SQL
-- **Domain Tagging & Filtering:** 16 domains (10 crypto + 6 legacy)
-- **Human Review Queue:** Flag low-confidence resolutions for manual review
-- **LLM-Based Entity Typing:** Advanced entity classification
-- **Multi-Domain Knowledge Management:** Unified data model across domains
+- **Portable Storage:** SQLite + ChromaDB + Kuzu - no external database servers required
 - **Hybrid Search:** BM25 + Vector (1024 dims) with cross-encoder reranking
-- **Auto Domain Detection:** Keyword screening + LLM analysis
-- **Self-Improvement:** Experience Bank, Prompt Evolution, Ontology Validation
+- **Knowledge Graph:** Entity/relationship extraction with Cypher queries
+- **Adaptive Extraction:** Multi-agent extraction pipeline with domain detection
+- **RAG Strategies:** 5 modes (STANDARD, HYBRID, DUAL_LEVEL, GRAPH_ENHANCED, CORRECTIVE)
+- **Temporal Information:** ISO-8601 normalized temporal claims
+- **Domain Detection:** Auto keyword screening + LLM analysis
+- **Community Detection:** Leiden clustering with hierarchical summarization
 
 ## Quick Start
 
@@ -26,39 +21,48 @@ uv sync
 
 # Setup environment
 cp .env.example .env
-# Edit .env with your credentials
-
-# Run database migrations
-alembic upgrade head
+# Edit .env with your API keys (secrets only)
+# Edit config.yaml for all other settings
 
 # Start Ollama for embeddings
 ollama pull bge-m3
 ollama serve
 
 # Ingest a document
-./ingest_cli.py /path/to/document.md --domain BITCOIN
+uv run kb ingest /path/to/document.md --domain BITCOIN
 
 # Or with auto-detection
-./ingest_cli.py /path/to/document.md
+uv run kb ingest /path/to/document.md
+
+# Start API server
+uv run uvicorn knowledge_base.main:app --reload --port 8088
 ```
+
+## Storage Architecture
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| SQLite + FTS5 | `data/kbv2.db` | Documents + Full-text search |
+| ChromaDB | `data/chroma/` | Vector similarity (HNSW) |
+| Kuzu | `data/kuzu/` | Knowledge graph (Cypher) |
+
+**No external database servers required** - all data stored in portable files.
 
 ## Documentation
 
 - **[Quick Start](QUICK_START.md)** - Get started in 5 minutes
 - **[Documentation](docs/README.md)** - Complete documentation index
 - **[Ingestion Guide](docs/guides/ingestion.md)** - Document ingestion methods
-- **[Deployment Guide](docs/guides/deployment.md)** - Production deployment
-- **[Self-Improvement Guide](docs/guides/self_improvement.md)** - Experience Bank, Prompt Evolution
 - **[Architecture Overview](docs/architecture/overview.md)** - System architecture
 
 ## Development
 
 ```bash
 # Lint
-uv run ruff check
+uv run ruff check src/
 
 # Format
-uv run ruff format
+uv run ruff format src/
 
 # Type check
 uv run mypy src/
@@ -69,33 +73,23 @@ uv run pytest tests/
 
 ## Technology Stack
 
-- **Backend:** FastAPI (Python 3.12)
-- **Database:** PostgreSQL 16+ with pgvector
-- **Vector Search:** pgvector (IVFFlat indexes, 1024-dim vectors)
+- **Language:** Python 3.12+
+- **Backend:** FastAPI with async support
+- **Documents + FTS:** SQLite + FTS5 (BM25)
+- **Vector Store:** ChromaDB (HNSW, 1024 dims)
+- **Graph Database:** Kuzu (embedded, Cypher)
+- **LLM Client:** AsyncOpenAI SDK (OpenAI-compatible)
 - **Embeddings:** Ollama (bge-m3)
-- **LLM Integration:** OpenAI SDK (AsyncOpenAI) with random model rotation
-- **Clustering:** igraph + leidenalg
+- **CLI:** Typer with Rich formatting
 
-## Environment Variables
+## Configuration
 
-```bash
-# Database
-DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
+Configuration is split between:
 
-# LLM Configuration (OpenAI-compatible API)
-LLM_API_BASE=http://localhost:8087/v1
-LLM_API_KEY=sk-dummy
+- **`config.yaml`** - All non-secret settings (LLM model, chunk sizes, etc.)
+- **`.env`** - Secrets only (API keys)
 
-# Embedding Configuration (Ollama)
-EMBEDDING_API_BASE=http://localhost:11434
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
-
-# Self-Improvement Features
-ENABLE_EXPERIENCE_BANK=true
-ENABLE_PROMPT_EVOLUTION=true
-ENABLE_ONTOLOGY_VALIDATION=true
-```
+See `config.yaml` for available options.
 
 ## License
 

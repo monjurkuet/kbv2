@@ -4,11 +4,12 @@ Get started with KBV2 in 5 minutes.
 
 ## Prerequisites
 
-- PostgreSQL 16+ with pgvector extension
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) package manager
 - Ollama (for embeddings)
 - OpenAI-compatible LLM API
+
+**No database setup required** - KBV2 uses portable SQLite/ChromaDB/Kuzu files.
 
 ## Installation
 
@@ -18,10 +19,8 @@ uv sync
 
 # Setup environment
 cp .env.example .env
-# Edit .env with your credentials
-
-# Run database migrations
-alembic upgrade head
+# Edit .env with your API keys (secrets only)
+# Edit config.yaml for all other settings
 ```
 
 ## Start Services
@@ -50,46 +49,44 @@ curl http://localhost:8087/v1/health
 
 ## Ingest Documents
 
-### Method 1: Direct CLI (Recommended)
+### Method 1: CLI (Recommended)
 
 ```bash
 # Ingest with specified domain
-./ingest_cli.py /path/to/document.md --domain BITCOIN
+uv run kb ingest /path/to/document.md --domain BITCOIN
 
 # Ingest with auto-detection
-./ingest_cli.py /path/to/document.md
-
-# With verbose output
-./ingest_cli.py /path/to/document.md --domain DEFI --verbose
+uv run kb ingest /path/to/document.md
 ```
 
-### Method 2: Simple Script
-
-```bash
-# Basic ingestion
-./ingest.py /path/to/document.md BITCOIN
-```
-
-### Method 3: Python API
+### Method 2: Python API
 
 ```python
 import asyncio
-from knowledge_base.orchestrator_self_improving import SelfImprovingOrchestrator
+from knowledge_base.common.dependencies import initialize_storage
 
-async def ingest(file_path: str, domain: str):
-    orchestrator = SelfImprovingOrchestrator()
-    await orchestrator.initialize()
-    
-    document = await orchestrator.process_document(
-        file_path=file_path,
-        document_name="My Document",
-        domain=domain,
-    )
-    
-    print(f"Ingested: {document.id}")
-    await orchestrator.close()
+async def ingest(file_path: str, domain: str = None):
+    # Initialize storage
+    stores = await initialize_storage()
+
+    # Process document (simplified example)
+    from knowledge_base.ingestion.document_processor import DocumentProcessor
+    processor = DocumentProcessor()
+
+    result = await processor.process(file_path, domain=domain)
+    print(f"Ingested: {result}")
 
 asyncio.run(ingest("/path/to/document.md", "BITCOIN"))
+```
+
+## Start API Server
+
+```bash
+# Start FastAPI server
+uv run uvicorn knowledge_base.main:app --reload --port 8088
+
+# API will be available at http://localhost:8088
+# Docs at http://localhost:8088/docs
 ```
 
 ## Supported Domains
@@ -110,43 +107,40 @@ asyncio.run(ingest("/path/to/document.md", "BITCOIN"))
 
 ## What You Get
 
-- **20-50 entities** extracted per document
-- **30-80 relationships** extracted per document
+- **Entities** extracted with types and properties
+- **Relationships** between entities
 - **1024-dim vectors** for semantic search
-- **Self-improvement** via Experience Bank
-- **Quality score** (target ≥ 0.75)
+- **Full-text search** via SQLite FTS5
+- **Knowledge graph** with Cypher queries
 
-## Query Results
+## API Endpoints
 
-```bash
-# Check document count
-psql -d knowledge_base -c "SELECT COUNT(*) FROM documents;"
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Health check |
+| `/documents` | POST | Create document |
+| `/documents` | GET | List documents |
+| `/search` | POST | Hybrid search |
+| `/graph/entities` | GET | List entities |
 
-# Check entities
-psql -d knowledge_base -c "SELECT COUNT(*) FROM entities;"
+## Storage Location
 
-# Experience Bank stats
-psql -d knowledge_base -c "SELECT COUNT(*) FROM extraction_experiences;"
+All data is stored in the `data/` directory:
+
+```
+data/
+├── kbv2.db        # SQLite (documents + FTS)
+├── chroma/        # ChromaDB (vectors)
+└── kuzu/          # Kuzu (graph)
 ```
 
 ## Next Steps
 
 - [Ingestion Guide](docs/guides/ingestion.md) - Complete ingestion documentation
-- [Deployment Guide](docs/guides/deployment.md) - Production deployment
-- [Self-Improvement Guide](docs/guides/self_improvement.md) - Experience Bank features
 - [Architecture Overview](docs/architecture/overview.md) - System architecture
+- [API Endpoints](docs/api/endpoints.md) - Full API reference
 
 ## Troubleshooting
-
-### Issue: Database connection failed
-
-```bash
-# Check PostgreSQL is running
-sudo systemctl status postgresql
-
-# Verify database exists
-psql -U postgres -c "\l" | grep knowledge_base
-```
 
 ### Issue: Embedding generation failed
 
@@ -168,18 +162,9 @@ curl http://localhost:8087/v1/health
 curl http://localhost:8087/v1/models
 ```
 
-## Environment Variables
+### Issue: Import errors
 
 ```bash
-# Database
-DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
-
-# LLM Configuration
-LLM_API_BASE=http://localhost:8087/v1
-LLM_API_KEY=sk-dummy
-
-# Embedding Configuration
-EMBEDDING_API_BASE=http://localhost:11434
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
+# Verify installation
+uv run python -c "from knowledge_base import __version__; print(__version__)"
 ```
