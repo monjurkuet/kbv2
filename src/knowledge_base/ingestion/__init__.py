@@ -1,11 +1,18 @@
-"""Ingestion package."""
+"""Document ingestion pipeline for the Knowledge Base System.
 
-from knowledge_base.ingestion.v1.embedding_client import EmbeddingClient
-from knowledge_base.ingestion.v1.gleaning_service import GleaningService
-from knowledge_base.ingestion.v1.partitioning_service import PartitioningService
+This module provides:
+- Vision model client for PDF/image to markdown conversion
+- Document processor for various file types
+- Semantic chunker for content splitting
+- Metadata extraction
+"""
+
+from knowledge_base.ingestion.vision_client import VisionModelClient
+from knowledge_base.ingestion.document_processor import DocumentProcessor
+from knowledge_base.ingestion.chunker import SemanticChunker
 
 __all__ = [
-    "EmbeddingClient",
-    "GleaningService",
-    "PartitioningService",
+    "VisionModelClient",
+    "DocumentProcessor",
+    "SemanticChunker",
 ]

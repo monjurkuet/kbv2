@@ -4,25 +4,19 @@ A high-fidelity information extraction engine that transforms unstructured data 
 
 ## Key Features
 
-- **High-Resolution Adaptive Gleaning**: 2-pass density-aware extraction strategy
-- **Grounded Global Entity Resolution**: Dedupes similar entities across the entire database with mandatory citations
-- **CLI-Based Knowledge Sanitization**: New `dedupe` command for global entity resolution sweeps
-- **Hierarchical Leiden Clustering**: Macro and Micro community detection
-- **Map-Reduce Recursive Summarization**: Intelligence reports with edge fidelity
-- **Temporal Information Extraction (IE)**: ISO-8601 normalized temporal claims
-- **Natural Language Query Interface**: Translate queries to SQL
-- **Domain Tagging & Filtering**: Propagate domain context throughout pipeline
-- **Human Review Queue**: Flag low-confidence resolutions for manual review
-- **LLM-Based Entity Typing**: Advanced entity classification using language models
-- **Multi-Domain Knowledge Management**: Unified data model across business domains
-- **Hybrid Search (BM25 + Vector)**: Combined keyword and semantic search
-- **Cross-Encoder Reranking**: Improved search result quality
-- **Auto Domain Detection**: Keyword screening + LLM analysis
-- **Multi-Modal Extraction**: Tables, images, figures via modified LLM prompts
-- **Guided Extraction**: Fully automated, domain-specific extraction
-- **Multi-Level Community Summaries**: Hierarchical entity clustering (macro → meso → micro → nano)
-- **Adaptive Type Discovery**: Schema induction from extracted data
-- **Unified Search API**: Single endpoint for all search modes
+- **Adaptive Extraction:** 2-pass density-aware extraction with document complexity analysis
+- **Verbatim-Grounded Entity Resolution:** Dedupes similar entities with mandatory citations
+- **Hierarchical Leiden Clustering:** Macro and micro community detection
+- **Map-Reduce Recursive Summarization:** Intelligence reports with edge fidelity
+- **Temporal Information Extraction:** ISO-8601 normalized temporal claims
+- **Natural Language Query Interface:** Translate queries to SQL
+- **Domain Tagging & Filtering:** 16 domains (10 crypto + 6 legacy)
+- **Human Review Queue:** Flag low-confidence resolutions for manual review
+- **LLM-Based Entity Typing:** Advanced entity classification
+- **Multi-Domain Knowledge Management:** Unified data model across domains
+- **Hybrid Search:** BM25 + Vector (1024 dims) with cross-encoder reranking
+- **Auto Domain Detection:** Keyword screening + LLM analysis
+- **Self-Improvement:** Experience Bank, Prompt Evolution, Ontology Validation
 
 ## Quick Start
 
@@ -34,50 +28,74 @@ uv sync
 cp .env.example .env
 # Edit .env with your credentials
 
-# Run the system
-uv run knowledge-base
+# Run database migrations
+alembic upgrade head
 
-# Run global deduplication sweep
-uv run python -m knowledge_base.clients.cli dedupe
+# Start Ollama for embeddings
+ollama pull bge-m3
+ollama serve
+
+# Ingest a document
+./ingest_cli.py /path/to/document.md --domain BITCOIN
+
+# Or with auto-detection
+./ingest_cli.py /path/to/document.md
 ```
-
-## Note on Frontend
-
-The frontend application has been removed from this repository. The system now provides all functionality via a comprehensive backend API. Users can interact with the system through:
-- Interactive API documentation at `http://localhost:8000/docs`
-- Direct API calls to the backend endpoints
-- WebSocket interface for real-time operations
 
 ## Documentation
 
-- **Comprehensive Guide**: [docs/README.md](./docs/README.md)
-- **Architecture Details**: [DESIGN_DOC.md](./DESIGN_DOC.md)
-- **Setup & Deployment**: [docs/OPERATIONS.md](./docs/OPERATIONS.md)
-- **Research & Implementation Plan**: [plan.md](./plan.md)
+- **[Quick Start](QUICK_START.md)** - Get started in 5 minutes
+- **[Documentation](docs/README.md)** - Complete documentation index
+- **[Ingestion Guide](docs/guides/ingestion.md)** - Document ingestion methods
+- **[Deployment Guide](docs/guides/deployment.md)** - Production deployment
+- **[Self-Improvement Guide](docs/guides/self_improvement.md)** - Experience Bank, Prompt Evolution
+- **[Architecture Overview](docs/architecture/overview.md)** - System architecture
 
 ## Development
 
-- **Lint**: `uv run ruff check`
-- **Format**: `uv run ruff format`
-- **Type check**: `uv run mypy src/`
-- **Tests**: `uv run pytest tests/`
+```bash
+# Lint
+uv run ruff check
 
-## Recent Changes
+# Format
+uv run ruff format
 
-- Added comprehensive research plan for LLM entity typing and multi-domain management
-- Removed temporary test files and cache directories
-- Updated documentation with current implementation status
-- Improved entity typing with domain-aware classification
+# Type check
+uv run mypy src/
 
-## Architecture
+# Tests
+uv run pytest tests/
+```
 
-The system consists of several key components:
+## Technology Stack
 
-1. **Ingestion Pipeline**: Document parsing, chunking, domain detection
-2. **Entity Extraction**: Multi-agent, gleaning, guided extraction
-3. **Hybrid Search**: BM25 index, vector store, reranking pipeline
-4. **Graph Management**: Hierarchical clustering, community summaries
-5. **Query Engine**: Natural language to SQL, hybrid search, reranking
+- **Backend:** FastAPI (Python 3.12)
+- **Database:** PostgreSQL 16+ with pgvector
+- **Vector Search:** pgvector (IVFFlat indexes, 1024-dim vectors)
+- **Embeddings:** Ollama (bge-m3)
+- **LLM Integration:** OpenAI SDK (AsyncOpenAI) with random model rotation
+- **Clustering:** igraph + leidenalg
+
+## Environment Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
+
+# LLM Configuration (OpenAI-compatible API)
+LLM_API_BASE=http://localhost:8087/v1
+LLM_API_KEY=sk-dummy
+
+# Embedding Configuration (Ollama)
+EMBEDDING_API_BASE=http://localhost:11434
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIMENSIONS=1024
+
+# Self-Improvement Features
+ENABLE_EXPERIENCE_BANK=true
+ENABLE_PROMPT_EVOLUTION=true
+ENABLE_ONTOLOGY_VALIDATION=true
+```
 
 ## License
 

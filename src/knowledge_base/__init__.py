@@ -1,11 +1,14 @@
 """Knowledge Base package.
 
-This package provides the core functionality for the Agentic Knowledge Ingestion
-& Management System, including orchestration of document ingestion, entity
-extraction, and knowledge graph construction.
+This package provides a portable, self-contained knowledge base system using:
+- SQLite + FTS5: Documents, full-text search
+- ChromaDB: Vector similarity search
+- Kuzu: Knowledge graph storage
+
+All components are file-based and require no external services.
 """
 
-from knowledge_base.orchestrator import IngestionOrchestrator
+__version__ = "0.2.0"
 
 
 def main() -> None:
@@ -29,4 +32,4 @@ def main() -> None:
     )
 
 
-__all__ = ["IngestionOrchestrator", "main"]
+__all__ = ["main", "__version__"]

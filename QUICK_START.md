@@ -1,121 +1,185 @@
-# KBV2 Quick Start - Full Feature Ingestion
+# KBV2 Quick Start
 
-## 🚀 Quick Ingestion Commands
+Get started with KBV2 in 5 minutes.
 
-```
-# Fastest way - CLI with all features enabled
-uv run python -m knowledge_base.clients.cli ingest /path/to/document.md \
-  --name "My Document" \
-  --domain "technology"
+## Prerequisites
 
-# Maintain knowledge base health - Global deduplication
-uv run python -m knowledge_base.clients.cli dedupe
-```
+- PostgreSQL 16+ with pgvector extension
+- Python 3.12+
+- [uv](https://github.com/astral-sh/uv) package manager
+- Ollama (for embeddings)
+- OpenAI-compatible LLM API
 
-## 📋 All 15 Pipeline Stages (Auto-Enabled)
-
-1. ✅ Document creation
-2. ✅ **Auto Domain Detection** (NEW - keyword + LLM analysis)
-3. ✅ Smart partitioning (1536 tokens, 25% overlap)
-4. ✅ **Multi-Modal Extraction** (NEW - tables, images, figures via modified LLM prompts)
-5. ✅ **Guided Extraction** (NEW - fully automated, domain-specific)
-6. ✅ Multi-agent extraction
-7. ✅ Embedding generation (with batching for performance)
-8. ✅ **Global Entity Resolution** (Cross-document deduplication)
-9. ✅ Entity clustering
-10. ✅ **Enhanced Community Summaries** (NEW - multi-level hierarchy)
-11. ✅ **Adaptive Type Discovery** (NEW - schema induction)
-12. ✅ Schema validation
-13. ✅ Hybrid Search Indexing (NEW - BM25 + Vector)
-14. ✅ **Reranking Pipeline** (NEW - cross-encoder)
-15. ✅ Intelligence reports
-
-## 🎯 Choose Your Domain (Auto-Detection Available)
+## Installation
 
 ```bash
---domain "technology"   # Tech companies, AI, frameworks
---domain "healthcare"   # Medical entities, diseases
---domain "legal"        # Contracts, cases, regulations
---domain "finance"      # Financial reports, markets
---domain "scientific"   # Research, scientific concepts
---domain "general"      # Mixed content
+# Install dependencies
+uv sync
 
-# Or omit --domain for auto-detection
-python -m knowledge_base.clients.cli ingest /path/to/document.md
+# Setup environment
+cp .env.example .env
+# Edit .env with your credentials
+
+# Run database migrations
+alembic upgrade head
 ```
 
-## 🔥 What You Get
+## Start Services
+
+### Start Ollama (Embeddings)
+
+```bash
+# Pull bge-m3 model
+ollama pull bge-m3
+
+# Start Ollama server
+ollama serve
+
+# Verify
+curl http://localhost:11434/api/tags
+```
+
+### Start LLM API
+
+Ensure your OpenAI-compatible LLM API is running at `http://localhost:8087/v1`.
+
+```bash
+# Verify
+curl http://localhost:8087/v1/health
+```
+
+## Ingest Documents
+
+### Method 1: Direct CLI (Recommended)
+
+```bash
+# Ingest with specified domain
+./ingest_cli.py /path/to/document.md --domain BITCOIN
+
+# Ingest with auto-detection
+./ingest_cli.py /path/to/document.md
+
+# With verbose output
+./ingest_cli.py /path/to/document.md --domain DEFI --verbose
+```
+
+### Method 2: Simple Script
+
+```bash
+# Basic ingestion
+./ingest.py /path/to/document.md BITCOIN
+```
+
+### Method 3: Python API
+
+```python
+import asyncio
+from knowledge_base.orchestrator_self_improving import SelfImprovingOrchestrator
+
+async def ingest(file_path: str, domain: str):
+    orchestrator = SelfImprovingOrchestrator()
+    await orchestrator.initialize()
+    
+    document = await orchestrator.process_document(
+        file_path=file_path,
+        document_name="My Document",
+        domain=domain,
+    )
+    
+    print(f"Ingested: {document.id}")
+    await orchestrator.close()
+
+asyncio.run(ingest("/path/to/document.md", "BITCOIN"))
+```
+
+## Supported Domains
+
+### Crypto Domains
+- `BITCOIN` - Bitcoin protocol, mining, ETFs
+- `DEFI` - DeFi protocols, TVL, yields
+- `INSTITUTIONAL_CRYPTO` - ETFs, custody, treasuries
+- `STABLECOINS` - USDC, USDT, backing
+- `CRYPTO_REGULATION` - SEC, legislation, compliance
+
+### Legacy Domains
+- `TECHNOLOGY` - Software, APIs, ML/AI
+- `FINANCIAL` - Financial reports, markets
+- `GENERAL` - Mixed content
+
+**Auto-Detection:** Omit `--domain` for automatic classification.
+
+## What You Get
 
 - **20-50 entities** extracted per document
-- **Multi-modal extraction** (tables, images, figures) - NO extra LLM cost
-- **Auto domain detection** using keyword screening + LLM analysis
-- **Guided extraction** fully automated based on detected domain
-- **Cross-domain relationships** detected automatically
-- **Refined entity types** with confidence scores
-- **Schema-validated** entities with required attributes
-- **Vector embeddings** for semantic search
-- **BM25 keyword search** for hybrid retrieval
-- **Cross-encoder reranking** for improved results
-- **Deduplicated** entities (Global ER across all documents)
-- **Multi-level community clusters** (macro → meso → micro → nano)
-- **Adaptive type discovery** with schema induction
-- **Intelligence reports** with insights
+- **30-80 relationships** extracted per document
+- **1024-dim vectors** for semantic search
+- **Self-improvement** via Experience Bank
+- **Quality score** (target ≥ 0.75)
 
-## ⚡ Performance
-
-- **Time**: ~560 seconds per document
-- **Timeout**: Use `--timeout 900` for large docs
-- **Progress**: Enable with `--verbose` flag
-
-## 🔍 Search Capabilities
+## Query Results
 
 ```bash
-# Hybrid search (BM25 + Vector)
-curl -X POST "http://localhost:8000/hybrid-search-v2" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "machine learning", "vector_weight": 0.5, "bm25_weight": 0.5, "top_k": 10}'
+# Check document count
+psql -d knowledge_base -c "SELECT COUNT(*) FROM documents;"
 
-# Reranked search (hybrid + cross-encoder)
-curl -X POST "http://localhost:8000/reranked-search" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "machine learning", "initial_top_k": 50, "final_top_k": 10}'
+# Check entities
+psql -d knowledge_base -c "SELECT COUNT(*) FROM entities;"
 
-# Unified search (all modes)
-curl -X POST "http://localhost:8000/unified-search/" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "machine learning", "mode": "reranked", "top_k": 10}'
+# Experience Bank stats
+psql -d knowledge_base -c "SELECT COUNT(*) FROM extraction_experiences;"
 ```
 
-## 📁 Example Scripts
+## Next Steps
 
-See `INGESTION_GUIDE.md` for:
-- WebSocket API usage
-- Progress tracking
-- Batch ingestion
-- Direct Python API
-- Search API examples
+- [Ingestion Guide](docs/guides/ingestion.md) - Complete ingestion documentation
+- [Deployment Guide](docs/guides/deployment.md) - Production deployment
+- [Self-Improvement Guide](docs/guides/self_improvement.md) - Experience Bank features
+- [Architecture Overview](docs/architecture/overview.md) - System architecture
 
-## 🆕 New Features in v2
+## Troubleshooting
 
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| **Auto Domain Detection** | Keyword screening + LLM analysis | Better extraction accuracy |
-| **Multi-Modal Extraction** | Tables, images, figures via modified prompts | No extra cost |
-| **Guided Extraction** | Fully automated, domain-specific prompts | +10s processing |
-| **Hybrid Search** | BM25 + Vector with weighted fusion | Better retrieval |
-| **Cross-Encoder Reranking** | Improved result ranking | Higher quality results |
-| **Multi-Level Summaries** | Macro → Meso → Micro → Nano hierarchies | Better organization |
-| **Adaptive Type Discovery** | Schema induction from data | Auto schema evolution |
-| **Batch Processing** | Parallel LLM/embedding calls | Performance optimization |
+### Issue: Database connection failed
 
-## 💡 Tips
+```bash
+# Check PostgreSQL is running
+sudo systemctl status postgresql
 
-1. **Auto-detection works well** - try without --domain first
-2. **Multi-modal extraction is automatic** - tables/images extracted via LLM
-3. **Hybrid search combines keywords + semantics** - best of both worlds
-4. **Multi-level communities** provide better entity organization
-5. **Type discovery auto-promotes** high-confidence new types
+# Verify database exists
+psql -U postgres -c "\l" | grep knowledge_base
+```
 
-## 📖 Full Documentation
+### Issue: Embedding generation failed
 
-See `INGESTION_GUIDE.md` for complete details!
+```bash
+# Check Ollama status
+curl http://localhost:11434/api/tags
+
+# Restart Ollama
+pkill ollama && ollama serve
+```
+
+### Issue: LLM API unavailable
+
+```bash
+# Check API health
+curl http://localhost:8087/v1/health
+
+# Check available models
+curl http://localhost:8087/v1/models
+```
+
+## Environment Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
+
+# LLM Configuration
+LLM_API_BASE=http://localhost:8087/v1
+LLM_API_KEY=sk-dummy
+
+# Embedding Configuration
+EMBEDDING_API_BASE=http://localhost:11434
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIMENSIONS=1024
+```

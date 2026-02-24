@@ -14,9 +14,8 @@ Core Algorithm:
 
 import logging
 from typing import List, Tuple, Optional, Dict, Any
-from uuid import UUID
 
-from knowledge_base.persistence.v1.schema import Chunk, ChunkEntity, Entity
+from knowledge_base.storage.portable.sqlite_store import Chunk, EntityMention
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +84,7 @@ class TextSpan:
         start_offset: int,
         end_offset: int,
         text: str,
-        entity_id: Optional[UUID] = None,
+        entity_id: Optional[str] = None,
         entity_name: Optional[str] = None,
         entity_type: Optional[str] = None,
         confidence: float = 1.0,
@@ -99,7 +98,7 @@ class TextSpan:
             start_offset: Absolute start position in document (0-indexed)
             end_offset: Absolute end position in document (exclusive)
             text: Extracted text snippet
-            entity_id: Linked entity UUID
+            entity_id: Linked entity ID
             entity_name: Entity name for display
             entity_type: Entity type (Person, Organization, etc.)
             confidence: Extraction confidence score
@@ -122,7 +121,7 @@ class TextSpan:
             "start_offset": self.start_offset,
             "end_offset": self.end_offset,
             "text": self.text,
-            "entity_id": str(self.entity_id) if self.entity_id else None,
+            "entity_id": self.entity_id,
             "entity_name": self.entity_name,
             "entity_type": self.entity_type,
             "confidence": self.confidence,
@@ -144,7 +143,7 @@ class OffsetCalculationService:
 
     @staticmethod
     def calculate_absolute_offsets(
-        chunks: List[Chunk], chunk_entities: List[Tuple[ChunkEntity, Entity]]
+        chunks: List[Chunk], entity_mentions: List[EntityMention]
     ) -> List[TextSpan]:
         """
         Calculate absolute offsets for entity grounding.
@@ -154,7 +153,7 @@ class OffsetCalculationService:
 
         Args:
             chunks: Ordered list of document chunks (sorted by chunk_index)
-            chunk_entities: List of (chunk_entity, entity) tuples with grounding data
+            entity_mentions: List of EntityMention objects with grounding data
 
         Returns:
             List of TextSpan objects with absolute offsets, sorted by position
@@ -168,20 +167,27 @@ class OffsetCalculationService:
         # Create mapping of chunk ID to chunk for efficient lookup
         chunk_by_id = {chunk.id: chunk for chunk in sorted_chunks}
 
-        # Process each chunk_entity
-        for chunk_entity, entity in chunk_entities:
-            chunk = chunk_by_id.get(chunk_entity.chunk_id)
+        # Calculate global offsets for each chunk
+        chunk_offsets = {}
+        current_offset = 0
+        for chunk in sorted_chunks:
+            chunk_offsets[chunk.id] = current_offset
+            current_offset += len(chunk.text or "")
+
+        # Process each entity mention
+        for mention in entity_mentions:
+            chunk = chunk_by_id.get(mention.chunk_id)
 
             if not chunk or not chunk.text:
                 logger.warning(
-                    f"Chunk not found or empty for chunk_entity {chunk_entity.id}"
+                    f"Chunk not found or empty for entity mention {mention.id}"
                 )
                 continue
 
-            grounding_quote = chunk_entity.grounding_quote
+            grounding_quote = mention.grounding_quote
 
             if not grounding_quote:
-                logger.warning(f"No grounding_quote for chunk_entity {chunk_entity.id}")
+                logger.warning(f"No grounding_quote for entity mention {mention.id}")
                 continue
 
             # Find the quote within the chunk text using exact string matching
@@ -206,6 +212,7 @@ class OffsetCalculationService:
                     continue
 
             # Calculate absolute offsets
+            global_offset = chunk_offsets.get(mention.chunk_id, 0)
             absolute_start = global_offset + local_start
             absolute_end = absolute_start + len(grounding_quote)
 
@@ -226,10 +233,10 @@ class OffsetCalculationService:
                 start_offset=absolute_start,
                 end_offset=absolute_end,
                 text=chunk.text[local_start : local_start + len(grounding_quote)],
-                entity_id=entity.id if entity else None,
-                entity_name=entity.name if entity else None,
-                entity_type=entity.entity_type if entity else None,
-                confidence=chunk_entity.confidence_score or 0.0,
+                entity_id=mention.entity_id,
+                entity_name=mention.entity_name,
+                entity_type=mention.entity_type,
+                confidence=mention.confidence,
                 grounding_quote=grounding_quote,
                 selectors=[position_selector.to_dict(), quote_selector.to_dict()],
             )
@@ -240,31 +247,6 @@ class OffsetCalculationService:
         text_spans.sort(key=lambda span: span.start_offset)
 
         return text_spans
-
-    @staticmethod
-    def calculate_offsets_for_document(
-        db_session: Any,
-        document_id: UUID,
-        confidence_threshold: float = 0.0,
-        entity_types: Optional[List[str]] = None,
-    ) -> List[TextSpan]:
-        """
-        Calculate offsets for all entities in a specific document.
-
-        High-level method that fetches required data and calculates offsets.
-
-        Args:
-            db_session: Database session
-            document_id: Document UUID
-            confidence_threshold: Minimum confidence to include
-            entity_types: Optional filter for entity types
-
-        Returns:
-            List of TextSpan objects for the document
-        """
-        # This would be implemented with actual ORM queries
-        # For now, it's a placeholder showing the API contract
-        pass
 
 
 def _extract_context(
@@ -407,7 +389,7 @@ class HighlightService:
                     "highlighted": True,
                     "entities": [
                         {
-                            "id": str(span.entity_id),
+                            "id": span.entity_id,
                             "name": span.entity_name,
                             "type": span.entity_type,
                             "confidence": span.confidence,

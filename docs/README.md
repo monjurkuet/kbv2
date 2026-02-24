@@ -1,333 +1,226 @@
 # KBV2 Documentation
 
-This directory contains ASCII diagrams and documentation for the KBV2 (Knowledge Base Version 2) system.
+This directory contains documentation for the KBV2 (Knowledge Base Version 2) system.
 
-## Overview
+## Quick Start
 
-KBV2 is a high-fidelity information extraction engine that transforms unstructured documents into a structured, temporally-aware knowledge graph using adaptive AI extraction techniques.
-
-## Documentation Files
-
-### 1. [architecture/system_overview.md](architecture/system_overview.md)
-**Purpose:** Visual representation of the 9-stage ingestion pipeline
-
-**Contents:**
-- Complete ReAct orchestration flow
-- Stage-by-stage breakdown:
-  1. Create Document
-  2. Partition Document
-  3. Extract Knowledge (Adaptive Gleaning)
-  4. Embed Content
-  5. Resolve Entities (Verbatim-Grounded)
-  6. Cluster Entities (Hierarchical Leiden)
-  7. Generate Reports (Map-Reduce)
-  8. Update Domain
-  9. Complete
-
-**Key Features:**
-- 2-pass adaptive extraction (Discovery + Gleaning)
-- Verbatim-grounded entity resolution
-- Hierarchical clustering (Macro + Micro)
-- Map-reduce summarization with edge fidelity
+1. [Quick Start](../../QUICK_START.md) - Get started with ingestion in 5 minutes
+2. [Ingestion Guide](guides/ingestion.md) - Complete ingestion documentation
+3. [Deployment Guide](guides/deployment.md) - Production deployment instructions
 
 ---
 
-### 2. [architecture/data_flow.md](architecture/data_flow.md)
-**Purpose:** Detailed data transformation through the pipeline
+## Documentation Structure
 
-**Contents:**
-- Input data processing (PDF/DOCX/Text)
-- Partitioning data structure
-- Extraction data (Pass 1 + Pass 2)
-- Entity creation and embedding
-- Entity resolution process
-- Clustering data (Level 0 + Level 1)
-- Synthesis data (Micro + Macro reports)
-- Domain propagation
-- Final data state
+### Guides
 
-**Key Features:**
-- Step-by-step data transformation
-- Example data structures
-- Confidence scores and thresholds
-- URI generation (RDF-style)
-- Temporal claim normalization
+Comprehensive guides for using KBV2 features:
 
----
+- [Ingestion Guide](guides/ingestion.md) - Document ingestion methods and pipeline
+- [Deployment Guide](guides/deployment.md) - Production setup and configuration
+- [Self-Improvement Guide](guides/self_improvement.md) - Experience Bank, Prompt Evolution, Ontology Validation
+- [Available Features](guides/available_features.md) - Features not in main pipeline
 
-### 3. [development/folder_structure.md](development/folder_structure.md)
-**Purpose:** Complete directory structure and file organization
+### Architecture
 
-**Contents:**
-- Root level files and directories
-- Source code structure (`src/knowledge_base/`)
-- Module breakdown:
-  - Core modules (orchestrator, APIs, services)
-  - Common module (gateway, temporal utils, resilient gateway)
-  - Ingestion module (partitioning, gleaning, embedding)
-  - Persistence module (schema, vector store)
-  - Intelligence module (resolution, clustering, synthesis)
-- Test structure
-- Documentation files
-- Configuration files
+System architecture and design documentation:
 
-**Key Features:**
-- File naming conventions
-- Class and method naming
-- Version convention (v1/)
-- Dependency injection pattern
+- [System Overview](architecture/overview.md) - High-level architecture and data flow
+- [Data Flow](architecture/data_flow.md) - Detailed data transformation pipeline
 
----
+### API
 
-### 4. [database/schema.md](database/schema.md)
-**Purpose:** Database schema relationships and table definitions
+API documentation and reference:
 
-**Contents:**
-- Entity-Relationship diagram
-- Table descriptions:
-  - Document
-  - Chunk
-  - Entity
-  - Edge
-  - ChunkEntity (junction)
-  - Community
-  - ReviewQueue
+- [API Endpoints](api/endpoints.md) - Complete API reference for all endpoints
 
-**Key Relationships:**
-- One-to-Many: Document → Chunk, Community → Entity
-- Many-to-Many: Chunk ↔ Entity, Entity ↔ Edge
-- Self-Referential: Community → Community (hierarchy)
+### Database
 
-**Edge Types (30+):**
-- Hierarchical: PART_OF, SUBCLASS_OF, INSTANCE_OF
-- Causal: CAUSES, INFLUENCES
-- Temporal: PRECEDES, FOLLOWS
-- Social: WORKS_FOR, KNOWS
-- Ownership: OWNS, MANAGES
-- Long-tail: UNKNOWN, NOTA, HYPOTHETICAL
+Database schema and relationships:
+
+- [Schema](database/schema.md) - Entity-Relationship diagrams and table definitions
+
+### Operations
+
+Operations and maintenance documentation:
+
+- [Setup Guide](operations/setup.md) - Installation and initial setup
+- [Runbook](operations/runbook.md) - Operations, monitoring, and troubleshooting
+
+### Development
+
+Development documentation:
+
+- [Folder Structure](development/folder_structure.md) - Directory structure and file organization
+
+### Archive
+
+Historical documentation and reports:
+
+- [Migration Reports](archive/migration_reports/) - OpenAI client migration, gateway consolidation
+- [Implementation Plans](archive/implementation_plans/) - Historical implementation plans
 
 ---
 
-### 5. [api/endpoints.md](api/endpoints.md)
-**Purpose:** Complete API reference for all endpoints
+## System Architecture
 
-**Contents:**
+KBV2 transforms unstructured documents into a structured, temporally-aware knowledge graph using adaptive AI extraction techniques.
 
-#### Query API (`/api/v1/query`)
-- `POST /translate` - Natural language to SQL (no execution)
-- `POST /execute` - Translate and execute query
-- `GET /schema` - Get database schema
+### Key Components
 
-#### Review API (`/api/v1/review`)
-- `GET /pending` - Get pending reviews by priority
-- `GET /{review_id}` - Get specific review
-- `POST /{review_id}/approve` - Approve review with notes
-- `POST /{review_id}/reject` - Reject with corrections
+1. **Ingestion Pipeline** - Document parsing, chunking, domain detection
+2. **Entity Extraction** - Multi-agent, gleaning, guided extraction
+3. **Hybrid Search** - BM25 index, vector store (1024 dims), reranking
+4. **Graph Management** - Hierarchical clustering, community summaries
+5. **Query Engine** - Natural language to SQL, hybrid search, reranking
+6. **Self-Improvement** - Experience Bank, Prompt Evolution, Ontology Validation
 
-#### MCP Server (WebSocket `/ws`)
-- `kbv2/ingest_document` - Ingest document
-- `kbv2/query_text_to_sql` - Execute text-to-SQL
-- `kbv2/search_entities` - Vector search entities
-- `kbv2/search_chunks` - Vector search chunks
-- `kbv2/get_document_status` - Get processing status
+### Supported Domains
 
-**Security Features:**
-- SQL injection prevention
-- Schema validation
-- Query timeout (5s)
-- Result limits (1000 rows)
-- Authentication/authorization
+**Crypto Domains (Primary):**
+- BITCOIN, DEFI, INSTITUTIONAL_CRYPTO, STABLECOINS, CRYPTO_REGULATION
+- DIGITAL_ASSETS, BLOCKCHAIN_INFRA, CRYPTO_MARKETS, CRYPTO_AI, TOKENIZATION
+
+**Legacy Domains:**
+- TECHNOLOGY, FINANCIAL, MEDICAL, LEGAL, SCIENTIFIC, GENERAL
 
 ---
-
-### 6. [configuration/environment.md](configuration/environment.md)
-**Purpose:** Configuration management and service initialization
-
-**Contents:**
-
-#### Environment Variables
-- `DATABASE_URL` - PostgreSQL connection
-- `OLLAMA_URL` - Ollama embedding service
-- `OLLAMA_MODEL` - Embedding model (nomic-embed-text)
-- `LLM_GATEWAY_URL` - LLM API gateway
-- `GOOGLE_API_KEY` - Optional Google embeddings
-
-#### Configuration Classes
-- **GleaningConfig** - Adaptive extraction parameters
-  - Density thresholds (0.3-0.8)
-  - Max passes (2)
-  - Diminishing returns (5%)
-  - Stability (90%)
-
-- **ResolutionConfig** - Entity deduplication parameters
-  - Confidence threshold (0.7)
-  - Similarity threshold (0.85)
-  - Max candidates (10)
-
-- **ClusteringConfig** - Hierarchical clustering parameters
-  - Min community size (3)
-  - Iterations (10)
-  - Macro resolution (0.8)
-  - Micro resolution (1.2)
-
-- **SynthesisConfig** - Report generation parameters
-  - Max tokens (2000)
-  - Edge fidelity (true)
-
-#### Service Initialization
-- Dependency injection pattern
-- Initialization sequence
-- Cleanup procedures
-- Connection management
-
-**Best Practices:**
-- Environment variable security
-- Type-safe configuration (Pydantic)
-- Startup validation
-- Error handling
-
----
-
-## Key System Features
-
-### 1. Adaptive Gleaning (2-Pass Extraction)
-- **Pass 1 (Discovery):** Extract obvious entities and relationships
-- **Pass 2 (Gleaning):** Find subtle, nested, technical relationships
-- **Adaptive Continuation:** Only runs Pass 2 if information density > 0.3 and stability < 90%
-
-### 2. Verbatim-Grounded Entity Resolution
-- **Hybrid Matching:** Vector similarity + LLM reasoning
-- **Verbatim Grounding:** Requires direct quotes from source text
-- **Conservative Approach:** Keeps entities separate when uncertain
-- **Human Review:** Low-confidence decisions added to ReviewQueue
-
-### 3. Hierarchical Leiden Clustering
-- **Level 0 (Macro):** Broad communities (resolution 0.8)
-- **Level 1 (Micro):** Tight communities (resolution 1.2)
-- **Hierarchy:** Micro communities have macro parents
-- **Incremental Updates:** Supports adding new entities
-
-### 4. Map-Reduce Summarization
-- **Micro Reports:** Detailed summaries of leaf communities
-- **Macro Reports:** Strategic synthesis of child reports
-- **Edge Fidelity:** Preserves raw relationships to prevent information smoothing
-
-### 5. Temporal Knowledge Graph
-- **Temporal Claims:** Classified as atemporal, static, or dynamic
-- **ISO-8601 Normalization:** All dates normalized to ISO-8601 format
-- **Temporal Validity:** Edges have validity start/end times
-- **Claim Invalidation:** Newer claims invalidate older ones
-
-### 6. Long-Tail Relation Handling
-- **NOTA (None-of-the-Above):** For rare/unclassifiable relations
-- **HYPOTHETICAL:** For uncertain relationships
-- **Based on 2026 DOREMI Research:** Optimizing long-tail predictions in document-level relation extraction
-
-### 7. Resilient Gateway
-- **Circuit Breaker:** CLOSED → OPEN → HALF_OPEN states
-- **Exponential Backoff:** Retry with jitter for transient failures
-- **Model Switching:** Automatic fallback on rate limits (429)
-- **Metrics Collection:** Requests, successes, failures, retries
-
-### 8. Security-First Text-to-SQL
-- **SQL Injection Prevention:** Pattern matching against dangerous keywords
-- **Schema Validation:** Whitelist-based identifier validation
-- **Query Timeout:** 5-second limit
-- **Result Limits:** Maximum 1000 rows
-
-## Technology Stack
-
-- **Language:** Python 3.12+
-- **Database:** PostgreSQL 16+ with pgvector
-- **Vector Search:** pgvector (IVFFlat indexes, 768-dim vectors)
-- **Document Parsing:** unstructured library
-- **Embeddings:** Ollama (nomic-embed-text)
-- **LLM Gateway:** OpenAI-compatible API (gemini-2.5-flash-lite)
-- **Clustering:** igraph + leidenalg
-- **API:** FastAPI
-- **Observability:** Logfire
 
 ## Getting Started
 
-1. **Install Dependencies:**
-   ```bash
-   uv sync
-   ```
+### Prerequisites
 
-2. **Configure Environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your credentials
-   ```
+- PostgreSQL 16+ with pgvector extension
+- Python 3.12+
+- uv package manager
+- Ollama (for embeddings)
+- OpenAI-compatible LLM API
 
-3. **Setup Database:**
-   ```bash
-   createdb knowledge_base
-   python scripts/setup_db.py
-   ```
+### Installation
 
-4. **Run:**
-   ```bash
-   uv run knowledge-base
-   ```
+```bash
+# Install dependencies
+uv sync
 
-## Architecture Patterns
+# Setup environment
+cp .env.example .env
+# Edit .env with your credentials
 
-### 1. ReAct Orchestration
-- Sequential pipeline with clear status transitions
-- Each stage is independent and observable
-- Error handling with status updates
+# Run database migrations
+alembic upgrade head
 
-### 2. Service Layer Pattern
-- Stateless service classes
-- Configuration injected via constructor
-- Clear separation of concerns
+# Start Ollama
+ollama pull bge-m3
+ollama serve
 
-### 3. Repository Pattern
-- VectorStore abstracts database operations
-- Async session management
-- Connection pooling
+# Start server
+uv run python -m knowledge_base.production
+```
 
-### 4. Resilience Patterns
-- Circuit breaker for fault tolerance
-- Exponential backoff with jitter
-- Automatic model switching
+### Quick Ingestion
 
-## Documentation Conventions
+```bash
+# Direct ingestion (no server needed)
+./ingest_cli.py /path/to/document.md --domain BITCOIN
 
-### ASCII Diagrams
-- Uses box-drawing characters (┌─┐│└┘┼┬┴├┤)
-- Monospace font for alignment
-- Clear labels and arrows
-- Consistent styling
+# Or with auto-detection
+./ingest_cli.py /path/to/document.md
+```
 
-### Code Examples
-- Python syntax highlighting
-- Type hints included
-- Docstrings in Google format
-- Error handling shown
+---
 
-### Tables
-- Markdown tables for parameters
-- Default values specified
-- Types and descriptions included
-- Examples provided
+## Key Features
 
-## Related Documentation
+### Adaptive Extraction
 
-- **Root Level:**
-  - [README.md](../README.md) - Project overview
-  - [DESIGN_DOC.md](../DESIGN_DOC.md) - High-level system design
-  - [SPEC.md](../SPEC.md) - Architecture specification
-  - [SETUP.md](../SETUP.md) - Setup instructions
+- **Document Complexity Analysis** - LLM analyzes complexity and recommends strategy
+- **Random Model Selection** - Each LLM call uses a different model
+- **Error Rotation** - Automatic retry with different models on any error
 
-- **Implementation:**
-  - [IMPLEMENTATION_SUMMARY.md](../IMPLEMENTATION_SUMMARY.md) - Changes summary
-  - [ENTITY_PROCESSING_PIPELINE.md](../ENTITY_PROCESSING_PIPELINE.md) - Entity processing
-  - [VALIDATION_SUMMARY.md](../VALIDATION_SUMMARY.md) - Validation results
+### Self-Improvement
 
-- **Planning:**
-  - [implementation_plan.md](../implementation_plan.md) - Implementation roadmap
+- **Experience Bank** - Stores high-quality extractions (quality ≥ 0.75) for few-shot learning
+- **Prompt Evolution** - Automated prompt optimization for 5 crypto domains
+- **Ontology Validation** - 15+ crypto-specific validation rules
+- **Domain Detection Feedback** - Learning from classification accuracy
+
+### Search Capabilities
+
+- **Hybrid Search** - BM25 + Vector with weighted fusion
+- **Reranking** - Cross-encoder for improved results
+- **RRF Fusion** - Reciprocal Rank Fusion for multi-query
+
+---
+
+## Technology Stack
+
+- **Backend:** FastAPI (Python 3.12)
+- **Database:** PostgreSQL with async SQLAlchemy
+- **Vector Search:** pgvector (1024-dim vectors, bge-m3)
+- **LLM Integration:** OpenAI SDK (AsyncOpenAI) with random model rotation
+- **Embeddings:** Ollama (bge-m3, 1024 dimensions)
+- **Clustering:** igraph + leidenalg
+- **Testing:** Pytest with async support
+
+---
+
+## Environment Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
+
+# LLM Configuration
+LLM_API_BASE=http://localhost:8087/v1
+LLM_API_KEY=sk-dummy
+
+# Embedding Configuration
+EMBEDDING_API_BASE=http://localhost:11434
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIMENSIONS=1024
+
+# Self-Improvement Features
+ENABLE_EXPERIENCE_BANK=true
+ENABLE_PROMPT_EVOLUTION=true
+ENABLE_ONTOLOGY_VALIDATION=true
+```
+
+---
+
+## Development
+
+### Code Quality
+
+```bash
+# Lint
+uv run ruff check src/
+
+# Format
+uv run ruff format src/
+
+# Type check
+uv run mypy src/
+
+# Tests
+uv run pytest tests/
+```
+
+### Project Structure
+
+```
+kbv2/
+├── src/knowledge_base/          # Source code
+│   ├── clients/                  # LLM and WebSocket clients
+│   ├── intelligence/v1/         # AI services
+│   ├── ingestion/v1/            # Document processing
+│   ├── persistence/v1/          # Database layer
+│   └── orchestration/            # Pipeline orchestration
+├── docs/                        # Documentation
+├── tests/                       # Test suite
+└── alembic/                     # Database migrations
+```
+
+---
 
 ## Support
 
@@ -335,6 +228,16 @@ KBV2 is a high-fidelity information extraction engine that transforms unstructur
 - **Questions:** Check existing documentation and issues first
 - **Contributions:** Follow Google Python Style Guide and existing patterns
 
+---
+
+## Related Documentation
+
+- [README](../../README.md) - Project overview
+- [QUICK_START](../../QUICK_START.md) - Quick start guide
+- [AGENTS.md](../../AGENTS.md) - Agent instructions
+
+---
+
 ## License
 
-See project LICENSE file for details.
+MIT

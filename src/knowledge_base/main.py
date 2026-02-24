@@ -1,588 +1,444 @@
 """
-Main FastAPI application entry point for KBV2 Knowledge Base API.
+Main entry point for Portable Knowledge Base System.
 
-This module orchestrates all API routers (query, review, graph, document) and
-configures global middleware and exception handlers for enterprise-grade API
-functionality following Google AIP standards.
+This module provides:
+- FastAPI application for REST API
+- CLI commands for document ingestion and querying
+- Lifespan management for storage components
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 from dotenv import load_dotenv
-
-load_dotenv()  # Load environment variables from .env
-
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from contextlib import asynccontextmanager
 
-from knowledge_base.common.aip193_middleware import AIP193ResponseMiddleware
-from knowledge_base.common.error_handlers import setup_exception_handlers
-from knowledge_base import (
-    query_api,
-    review_api,
-    graph_api,
-    document_api,
-    mcp_server,
-    schema_api,
+load_dotenv()
+
+from knowledge_base.storage.portable import (
+    SQLiteStore,
+    ChromaStore,
+    KuzuGraphStore,
+    HybridSearchEngine,
+    PortableStorageConfig,
 )
+from knowledge_base.storage.portable.sqlite_store import Document, Chunk
+from knowledge_base.ingestion import (
+    VisionModelClient,
+    DocumentProcessor,
+    SemanticChunker,
+)
+from knowledge_base.extraction import ExtractionPipeline
 
-
+# Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Global storage components
+_storage_config: Optional[PortableStorageConfig] = None
+_sqlite_store: Optional[SQLiteStore] = None
+_chroma_store: Optional[ChromaStore] = None
+_kuzu_store: Optional[KuzuGraphStore] = None
+_search_engine: Optional[HybridSearchEngine] = None
+_vision_client: Optional[VisionModelClient] = None
+_doc_processor: Optional[DocumentProcessor] = None
+_extraction_pipeline: Optional[ExtractionPipeline] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
-    # Startup logic
-    await startup_event()
+    global _storage_config, _sqlite_store, _chroma_store, _kuzu_store
+    global _search_engine, _vision_client, _doc_processor, _extraction_pipeline
+
+    # Startup
+    logger.info("Starting Portable Knowledge Base...")
+
+    try:
+        # Initialize configuration
+        _storage_config = PortableStorageConfig()
+        _storage_config.ensure_directories()
+
+        # Initialize storage components
+        _sqlite_store = SQLiteStore(_storage_config.sqlite)
+        await _sqlite_store.initialize()
+        logger.info("SQLite store initialized")
+
+        _chroma_store = ChromaStore(_storage_config.chroma)
+        await _chroma_store.initialize()
+        logger.info("ChromaDB store initialized")
+
+        _kuzu_store = KuzuGraphStore(_storage_config.kuzu)
+        await _kuzu_store.initialize()
+        logger.info("Kuzu graph store initialized")
+
+        # Initialize search engine
+        _search_engine = HybridSearchEngine(
+            sqlite_store=_sqlite_store,
+            chroma_store=_chroma_store,
+            kuzu_store=_kuzu_store,
+            config=_storage_config.hybrid_search,
+        )
+        logger.info("Hybrid search engine initialized")
+
+        # Initialize vision client (optional)
+        try:
+            _vision_client = VisionModelClient()
+            await _vision_client.initialize()
+
+            # Check health
+            health = await _vision_client.health_check()
+            if health.get("status") == "healthy":
+                logger.info(f"Vision model API healthy: {health.get('available_models', [])}")
+                _doc_processor = DocumentProcessor(vision_client=_vision_client)
+                _extraction_pipeline = ExtractionPipeline(_vision_client)
+            else:
+                logger.warning(f"Vision model API not available: {health}")
+        except Exception as e:
+            logger.warning(f"Vision model initialization failed: {e}")
+
+        logger.info("Portable Knowledge Base started successfully")
+
+    except Exception as e:
+        logger.error(f"Startup failed: {e}", exc_info=True)
+        raise
+
     yield
-    # Shutdown logic
-    await shutdown_event()
+
+    # Shutdown
+    logger.info("Shutting down Portable Knowledge Base...")
+
+    if _vision_client:
+        await _vision_client.close()
+    if _kuzu_store:
+        await _kuzu_store.close()
+    if _chroma_store:
+        await _chroma_store.close()
+    if _sqlite_store:
+        await _sqlite_store.close()
+
+    logger.info("Portable Knowledge Base shutdown complete")
 
 
+# Create FastAPI app
 app = FastAPI(
-    title="KBV2 Knowledge Base API",
-    description="High-fidelity information extraction and graph visualization API",
-    version="1.0.0",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
-    openapi_url="/api/v1/openapi.json",
+    title="Portable Knowledge Base API",
+    description="Self-contained knowledge base with vector search, graph database, and RAG",
+    version="0.2.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
     lifespan=lifespan,
 )
 
-from knowledge_base.mcp_server import KBV2MCPProtocol
-
-kbv2_protocol = KBV2MCPProtocol()
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for MCP protocol."""
-    await kbv2_protocol.connect(websocket)
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await kbv2_protocol.handle_message(websocket, message)
-    except WebSocketDisconnect:
-        kbv2_protocol.disconnect(websocket)
-
-
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # Local isolated system - no credentials needed
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-@app.middleware("http")
-async def add_request_id_middleware(request: Request, call_next: Any):
-    """
-    Middleware to generate and track request IDs for observability.
-
-    Adds x-request-id header to all requests for tracing through the system.
-    """
-    import uuid
-
-    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
-    request.state.request_id = request_id
-
-    response = await call_next(request)
-    response.headers["x-request-id"] = request_id
-
-    return response
-
-
-app.add_middleware(AIP193ResponseMiddleware)
-
-
-setup_exception_handlers(app)
-
+# ==================== Health Endpoints ====================
 
 class HealthResponse(BaseModel):
-    """Health check response model."""
-
+    """Health check response."""
     status: str
     version: str
-    name: str
+    components: dict[str, bool]
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 async def health_check():
-    """
-    Health check endpoint for monitoring and load balancers.
-
-    Returns:
-        Basic service health information
-    """
-    # For isolated local system, basic health check
-    # In production, verify database connectivity here
+    """Health check endpoint."""
     return HealthResponse(
-        status="healthy", version="1.0.0", name="KBV2 Knowledge Base API"
+        status="healthy",
+        version="0.2.0",
+        components={
+            "sqlite": _sqlite_store is not None,
+            "chromadb": _chroma_store is not None,
+            "kuzu": _kuzu_store is not None,
+            "vision_api": _vision_client is not None,
+        }
     )
 
 
-@app.get("/ready", response_model=HealthResponse, tags=["health"])
-async def readiness_check():
-    """
-    Readiness check endpoint for Kubernetes deployments.
+@app.get("/stats", tags=["health"])
+async def get_stats():
+    """Get storage statistics."""
+    stats = {}
 
-    Returns:
-        Service readiness status
-    """
-    return HealthResponse(
-        status="ready", version="1.0.0", name="KBV2 Knowledge Base API"
+    if _sqlite_store:
+        stats["sqlite"] = await _sqlite_store.get_stats()
+    if _chroma_store:
+        stats["chromadb"] = await _chroma_store.get_stats()
+    if _kuzu_store:
+        stats["kuzu"] = await _kuzu_store.get_stats()
+
+    return stats
+
+
+# ==================== Document Endpoints ====================
+
+class DocumentCreate(BaseModel):
+    """Document creation request."""
+    name: str
+    source_uri: Optional[str] = None
+    content: Optional[str] = None
+    domain: Optional[str] = None
+    metadata: dict = {}
+
+
+class DocumentResponse(BaseModel):
+    """Document response."""
+    id: str
+    name: str
+    status: str
+    created_at: str
+
+
+@app.post("/documents", response_model=DocumentResponse, tags=["documents"])
+async def create_document(doc: DocumentCreate):
+    """Create a new document."""
+    if not _sqlite_store:
+        raise RuntimeError("Storage not initialized")
+
+    document = Document(
+        name=doc.name,
+        source_uri=doc.source_uri,
+        content=doc.content,
+        domain=doc.domain,
+        metadata=doc.metadata,
+    )
+
+    doc_id = await _sqlite_store.add_document(document)
+
+    return DocumentResponse(
+        id=doc_id,
+        name=doc.name,
+        status="pending",
+        created_at=document.created_at.isoformat(),
     )
 
 
-app.include_router(query_api.router, tags=["query"])
-app.include_router(review_api.router, tags=["review"])
-app.include_router(graph_api.router, tags=["graphs"])
-app.include_router(document_api.router, tags=["documents"])
-app.include_router(schema_api.router, tags=["schemas"])
+@app.get("/documents", tags=["documents"])
+async def list_documents(
+    status: Optional[str] = None,
+    domain: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """List documents."""
+    if not _sqlite_store:
+        raise RuntimeError("Storage not initialized")
 
-
-@app.get("/api/v1/openapi")
-async def get_openapi():
-    """
-    Alternative OpenAPI endpoint for better client generation.
-
-    Returns:
-        Complete OpenAPI specification
-    """
-    from fastapi.openapi.utils import get_openapi
-
-    if app.openapi_schema:
-        return app.openapi_schema
-
-    openapi_schema = get_openapi(
-        title="KBV2 Knowledge Base API",
-        version="1.0.0",
-        description="High-fidelity information extraction and graph visualization API",
-        routes=app.routes,
+    docs = await _sqlite_store.list_documents(
+        status=status,
+        domain=domain,
+        limit=limit,
+        offset=offset,
     )
 
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
+    return {
+        "documents": [
+            {
+                "id": d.id,
+                "name": d.name,
+                "status": d.status,
+                "domain": d.domain,
+                "created_at": d.created_at.isoformat(),
+            }
+            for d in docs
+        ],
+        "count": len(docs),
+    }
 
 
-async def startup_event():
-    """
-    Startup event handler for application initialization.
+@app.get("/documents/{document_id}", tags=["documents"])
+async def get_document(document_id: str):
+    """Get a document by ID."""
+    if not _sqlite_store:
+        raise RuntimeError("Storage not initialized")
 
-    Runs when the FastAPI application starts up.
-    """
-    logger.info("KBV2 Knowledge Base API starting up...")
+    doc = await _sqlite_store.get_document(document_id)
+    if not doc:
+        return {"error": "Document not found"}
 
-    try:
-        from knowledge_base.persistence.v1.schema import Base
-        from sqlalchemy import create_engine
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-        import os
-
-        database_url = os.getenv("DATABASE_URL")
-        if database_url:
-            engine = create_engine(database_url)
-            Base.metadata.create_all(engine)
-            logger.info("Database tables verified/created successfully")
-
-            # Setup async session factory
-            from knowledge_base.common.dependencies import set_session_factory
-
-            async_engine = create_async_engine(
-                database_url.replace("postgresql://", "postgresql+asyncpg://")
-            )
-            session_factory = async_sessionmaker(
-                async_engine, class_=AsyncSession, expire_on_commit=False
-            )
-            set_session_factory(session_factory)
-            logger.info("Async session factory initialized")
-        else:
-            logger.warning(
-                "DATABASE_URL environment variable not set. Skipping database initialization."
-            )
-
-        await kbv2_protocol.initialize()
-        logger.info("MCP server initialized")
-
-        from knowledge_base.intelligence import (
-            SchemaRegistry,
-            EntityTypeDef,
-            DomainAttribute,
-            InheritanceType,
-        )
-        from knowledge_base.common.dependencies import get_session_factory
-
-        session_factory = get_session_factory()
-        async with session_factory() as db:
-            registry = SchemaRegistry(db)
-            existing = await registry.list_schemas()
-
-            if not existing:
-                logger.info("Initializing domain schemas...")
-
-                DOMAIN_CONFIGS = [
-                    {
-                        "domain_name": "GENERAL",
-                        "domain_display_name": "General Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="NamedEntity",
-                                parent_type="OTHER",
-                                attributes={},
-                            )
-                        ],
-                        "parent_domain_name": None,
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "TECHNOLOGY",
-                        "domain_display_name": "Technology Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Software",
-                                parent_type="PRODUCT",
-                                attributes={
-                                    "version": DomainAttribute(
-                                        name="version", attribute_type="str"
-                                    ),
-                                    "license": DomainAttribute(
-                                        name="license", attribute_type="str"
-                                    ),
-                                    "programming_language": DomainAttribute(
-                                        name="programming_language",
-                                        attribute_type="List[str]",
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="API",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "endpoint": DomainAttribute(
-                                        name="endpoint", attribute_type="str"
-                                    ),
-                                    "method": DomainAttribute(
-                                        name="method", attribute_type="str"
-                                    ),
-                                    "status": DomainAttribute(
-                                        name="status", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="Framework",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "language": DomainAttribute(
-                                        name="language", attribute_type="str"
-                                    ),
-                                    "version": DomainAttribute(
-                                        name="version", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "FINANCIAL",
-                        "domain_display_name": "Financial Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Company",
-                                parent_type="ORGANIZATION",
-                                attributes={
-                                    "ticker_symbol": DomainAttribute(
-                                        name="ticker_symbol", attribute_type="str"
-                                    ),
-                                    "market_cap": DomainAttribute(
-                                        name="market_cap", attribute_type="float"
-                                    ),
-                                    "stock_exchange": DomainAttribute(
-                                        name="stock_exchange", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="FinancialInstrument",
-                                parent_type="PRODUCT",
-                                attributes={
-                                    "isin": DomainAttribute(
-                                        name="isin", attribute_type="str"
-                                    ),
-                                    "currency": DomainAttribute(
-                                        name="currency", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "MEDICAL",
-                        "domain_display_name": "Medical Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Drug",
-                                parent_type="PRODUCT",
-                                attributes={
-                                    "active_ingredients": DomainAttribute(
-                                        name="active_ingredients",
-                                        attribute_type="List[str]",
-                                    ),
-                                    "dosage": DomainAttribute(
-                                        name="dosage", attribute_type="str"
-                                    ),
-                                    "manufacturer": DomainAttribute(
-                                        name="manufacturer", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="Procedure",
-                                parent_type="EVENT",
-                                attributes={
-                                    "procedure_type": DomainAttribute(
-                                        name="procedure_type", attribute_type="str"
-                                    ),
-                                    "outcome": DomainAttribute(
-                                        name="outcome", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "LEGAL",
-                        "domain_display_name": "Legal Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Contract",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "parties": DomainAttribute(
-                                        name="parties", attribute_type="List[str]"
-                                    ),
-                                    "effective_date": DomainAttribute(
-                                        name="effective_date", attribute_type="datetime"
-                                    ),
-                                    "expiration_date": DomainAttribute(
-                                        name="expiration_date",
-                                        attribute_type="datetime",
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="Court",
-                                parent_type="ORGANIZATION",
-                                attributes={
-                                    "jurisdiction": DomainAttribute(
-                                        name="jurisdiction", attribute_type="str"
-                                    ),
-                                    "level": DomainAttribute(
-                                        name="level", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "HEALTHCARE",
-                        "domain_display_name": "Healthcare Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="HealthcareProvider",
-                                parent_type="ORGANIZATION",
-                                attributes={
-                                    "specialty": DomainAttribute(
-                                        name="specialty", attribute_type="str"
-                                    ),
-                                    "accreditation": DomainAttribute(
-                                        name="accreditation", attribute_type="List[str]"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="InsurancePlan",
-                                parent_type="PRODUCT",
-                                attributes={
-                                    "coverage_type": DomainAttribute(
-                                        name="coverage_type", attribute_type="str"
-                                    ),
-                                    "premium": DomainAttribute(
-                                        name="premium", attribute_type="float"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "ACADEMIC",
-                        "domain_display_name": "Academic Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Publication",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "title": DomainAttribute(
-                                        name="title", attribute_type="str"
-                                    ),
-                                    "authors": DomainAttribute(
-                                        name="authors", attribute_type="List[str]"
-                                    ),
-                                    "publication_date": DomainAttribute(
-                                        name="publication_date",
-                                        attribute_type="datetime",
-                                    ),
-                                    "venue": DomainAttribute(
-                                        name="venue", attribute_type="str"
-                                    ),
-                                    "citation_count": DomainAttribute(
-                                        name="citation_count", attribute_type="int"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="ResearchField",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "discipline": DomainAttribute(
-                                        name="discipline", attribute_type="str"
-                                    ),
-                                    "subdisciplines": DomainAttribute(
-                                        name="subdisciplines",
-                                        attribute_type="List[str]",
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                    {
-                        "domain_name": "SCIENTIFIC",
-                        "domain_display_name": "Scientific Domain",
-                        "entity_types": [
-                            EntityTypeDef(
-                                type_name="Theory",
-                                parent_type="CONCEPT",
-                                attributes={
-                                    "formulated_by": DomainAttribute(
-                                        name="formulated_by", attribute_type="str"
-                                    ),
-                                    "year_proposed": DomainAttribute(
-                                        name="year_proposed", attribute_type="int"
-                                    ),
-                                    "status": DomainAttribute(
-                                        name="status", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                            EntityTypeDef(
-                                type_name="Experiment",
-                                parent_type="EVENT",
-                                attributes={
-                                    "hypothesis": DomainAttribute(
-                                        name="hypothesis", attribute_type="str"
-                                    ),
-                                    "methodology": DomainAttribute(
-                                        name="methodology", attribute_type="str"
-                                    ),
-                                    "results": DomainAttribute(
-                                        name="results", attribute_type="str"
-                                    ),
-                                },
-                            ),
-                        ],
-                        "parent_domain_name": "GENERAL",
-                        "inheritance_type": InheritanceType.EXTENDS,
-                    },
-                ]
-
-                from knowledge_base.intelligence.v1.domain_schema_service import (
-                    DomainSchemaCreate,
-                    DomainLevel,
-                )
-
-                for config in DOMAIN_CONFIGS:
-                    # Convert list of EntityTypeDef to dict with type_name as key
-                    entity_types_dict = {
-                        et.type_name: et for et in config["entity_types"]
-                    }
-                    schema = DomainSchemaCreate(
-                        domain_name=config["domain_name"],
-                        domain_display_name=config["domain_display_name"],
-                        entity_types=entity_types_dict,
-                        parent_domain_name=config["parent_domain_name"],
-                        inheritance_type=config["inheritance_type"],
-                        domain_level=DomainLevel.PRIMARY,
-                    )
-                    await registry.register(schema)
-
-                logger.info(f"Initialized {len(DOMAIN_CONFIGS)} domain schemas")
-            else:
-                logger.info(f"Found {len(existing)} existing domain schemas")
-
-    except Exception as e:
-        logger.error(f"Error during startup: {e}", exc_info=True)
-
-    logger.info("KBV2 API startup complete")
+    return {
+        "id": doc.id,
+        "name": doc.name,
+        "source_uri": doc.source_uri,
+        "content": doc.content,
+        "status": doc.status,
+        "domain": doc.domain,
+        "metadata": doc.metadata,
+        "created_at": doc.created_at.isoformat(),
+    }
 
 
-async def shutdown_event():
-    """
-    Shutdown event handler for graceful cleanup.
+# ==================== Search Endpoints ====================
 
-    Runs when the FastAPI application shuts down.
-    """
-    logger.info("KBV2 Knowledge Base API shutting down...")
+class SearchRequest(BaseModel):
+    """Search request."""
+    query: str
+    limit: int = 10
 
-    # Cleanup database connections
-    try:
-        from knowledge_base.common.dependencies import get_session_factory
 
-        session_factory = get_session_factory()
-        if session_factory:
-            logger.info("Closing database session factory")
-    except Exception as e:
-        logger.error(f"Error closing session factory: {e}")
+class SearchResult(BaseModel):
+    """Search result."""
+    chunk_id: str
+    document_id: str
+    text: str
+    score: float
+    document_name: Optional[str] = None
 
-    # Close vector store connections
-    try:
-        from knowledge_base.persistence.v1.vector_store import VectorStore
 
-        # VectorStore connections are managed by the orchestrator
-        logger.info("Vector store cleanup completed")
-    except Exception as e:
-        logger.error(f"Error closing vector store: {e}")
+@app.post("/search", tags=["search"])
+async def search(request: SearchRequest):
+    """Search for documents."""
+    if not _search_engine:
+        raise RuntimeError("Search engine not initialized")
 
-    # Close MCP server
-    try:
-        await kbv2_protocol.shutdown()
-        logger.info("MCP server shutdown complete")
-    except Exception as e:
-        logger.error(f"Error shutting down MCP server: {e}")
+    results = await _search_engine.search(
+        query=request.query,
+        limit=request.limit,
+    )
 
-    logger.info("KBV2 API shutdown complete")
+    return {
+        "results": [
+            {
+                "chunk_id": r.chunk_id,
+                "document_id": r.document_id,
+                "text": r.text[:500] + "..." if len(r.text) > 500 else r.text,
+                "score": r.score,
+                "document_name": r.document_name,
+            }
+            for r in results
+        ],
+        "query": request.query,
+        "count": len(results),
+    }
+
+
+# ==================== Ingestion Endpoints ====================
+
+class IngestRequest(BaseModel):
+    """Ingestion request."""
+    file_path: str
+    domain: Optional[str] = None
+
+
+class IngestResponse(BaseModel):
+    """Ingestion response."""
+    document_id: str
+    name: str
+    status: str
+    chunk_count: int
+
+
+@app.post("/ingest", response_model=IngestResponse, tags=["ingestion"])
+async def ingest_document(request: IngestRequest):
+    """Ingest a document from file path."""
+    if not _doc_processor or not _sqlite_store:
+        raise RuntimeError("Document processor not initialized")
+
+    path = Path(request.file_path)
+    if not path.exists():
+        return {"error": f"File not found: {request.file_path}"}
+
+    # Process document
+    processed = await _doc_processor.process(path)
+
+    # Create document in store
+    document = Document(
+        name=processed.name,
+        source_uri=processed.source_path,
+        content=processed.content,
+        domain=request.domain,
+        metadata=processed.metadata,
+        status="processed",
+    )
+
+    doc_id = await _sqlite_store.add_document(document)
+
+    # Chunk document
+    chunker = SemanticChunker()
+    chunks = chunker.chunk(processed.content, doc_id)
+
+    # Store chunks
+    chunk_ids = await _sqlite_store.add_chunks_batch(chunks)
+
+    return IngestResponse(
+        document_id=doc_id,
+        name=processed.name,
+        status="processed",
+        chunk_count=len(chunk_ids),
+    )
+
+
+# ==================== Graph Endpoints ====================
+
+@app.get("/graph/entities", tags=["graph"])
+async def list_entities(
+    name: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """List entities from knowledge graph."""
+    if not _kuzu_store:
+        raise RuntimeError("Graph store not initialized")
+
+    entities = await _kuzu_store.search_entities(
+        name=name,
+        entity_type=entity_type,
+        limit=limit,
+    )
+
+    return {
+        "entities": [
+            {
+                "id": e.id,
+                "name": e.name,
+                "type": e.entity_type,
+                "description": e.description,
+                "domain": e.domain,
+            }
+            for e in entities
+        ],
+        "count": len(entities),
+    }
+
+
+@app.get("/graph/entities/{entity_id}", tags=["graph"])
+async def get_entity(entity_id: str):
+    """Get an entity and its relationships."""
+    if not _kuzu_store:
+        raise RuntimeError("Graph store not initialized")
+
+    entity = await _kuzu_store.get_entity(entity_id)
+    if not entity:
+        return {"error": "Entity not found"}
+
+    relationships = await _kuzu_store.get_entity_relationships(entity_id)
+
+    return {
+        "entity": {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "description": entity.description,
+            "domain": entity.domain,
+        },
+        "relationships": relationships,
+    }
 
 
 if __name__ == "__main__":
@@ -593,6 +449,5 @@ if __name__ == "__main__":
         host="localhost",
         port=8765,
         reload=True,
-        reload_dirs=["."],
-        log_config=None,  # Use our custom logging configuration
+        log_config=None,
     )

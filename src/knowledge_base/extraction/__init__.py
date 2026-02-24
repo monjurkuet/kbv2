@@ -1,21 +1,28 @@
-"""Knowledge base extraction modules."""
+"""Structured extraction for Knowledge Base System.
 
-from knowledge_base.extraction.template_registry import (
-    ExtractionGoal,
-    TemplateRegistry,
-    get_default_goals,
+This module provides:
+- Pydantic schemas for trading content extraction
+- Entity extraction with validation
+- Price target and trading setup extraction
+- Pipeline for batch extraction
+"""
+
+from knowledge_base.extraction.schemas import (
+    PriceTarget,
+    TradingSetup,
+    MarketAnalysis,
+    EducationalConcept,
+    VideoAnalysis,
+    DocumentAnalysis,
 )
-from knowledge_base.extraction.guided_extractor import (
-    GuidedExtractor,
-    ExtractionPrompt,
-    ExtractionPrompts,
-)
+from knowledge_base.extraction.pipeline import ExtractionPipeline
 
 __all__ = [
-    "ExtractionGoal",
-    "TemplateRegistry",
-    "get_default_goals",
-    "GuidedExtractor",
-    "ExtractionPrompt",
-    "ExtractionPrompts",
+    "PriceTarget",
+    "TradingSetup",
+    "MarketAnalysis",
+    "EducationalConcept",
+    "VideoAnalysis",
+    "DocumentAnalysis",
+    "ExtractionPipeline",
 ]
