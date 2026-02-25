@@ -53,10 +53,10 @@ curl http://localhost:8087/v1/health
 
 ```bash
 # Ingest with specified domain
-uv run kb ingest /path/to/document.md --domain BITCOIN
+uv run knowledge-base ingest /path/to/document.md --domain BITCOIN
 
 # Ingest with auto-detection
-uv run kb ingest /path/to/document.md
+uv run knowledge-base ingest /path/to/document.md
 ```
 
 ### Method 2: Python API
@@ -82,11 +82,17 @@ asyncio.run(ingest("/path/to/document.md", "BITCOIN"))
 ## Start API Server
 
 ```bash
-# Start FastAPI server
+# One-stop start script (recommended)
+./start.sh
+
+# Or with auto-reload for development
+./start.sh --reload
+
+# Or manual start
 uv run uvicorn knowledge_base.main:app --reload --port 8088
 
 # API will be available at http://localhost:8088
-# Docs at http://localhost:8088/docs
+# Docs at http://localhost:8088/redoc
 ```
 
 ## Supported Domains
@@ -118,9 +124,11 @@ uv run uvicorn knowledge_base.main:app --reload --port 8088
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/health` | GET | Health check |
+| `/stats` | GET | Storage statistics |
 | `/documents` | POST | Create document |
 | `/documents` | GET | List documents |
 | `/search` | POST | Hybrid search |
+| `/ingest` | POST | Ingest document from file |
 | `/graph/entities` | GET | List entities |
 
 ## Storage Location

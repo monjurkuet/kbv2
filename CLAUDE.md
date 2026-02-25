@@ -123,25 +123,35 @@ Portable, file-based storage in `data/` directory:
 
 ---
 
-## Environment Variables
+## Configuration
 
+Configuration is split between two files:
+
+**config.yaml** - All non-secret settings:
+```yaml
+storage:
+  data_dir: data
+
+llm:
+  gateway_url: http://localhost:8087/v1/
+  model: gemini-2.5-flash-lite
+  temperature: 0.7
+  max_tokens: 4096
+
+embedding:
+  api_base: http://localhost:11434
+  model: bge-m3
+  dimension: 1024
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 50
+```
+
+**.env** - Secrets only:
 ```bash
-# Storage
-KB__DATA_DIR=data
-
-# LLM Configuration
-LLM_GATEWAY_URL=http://localhost:8087/v1/
 LLM_API_KEY=
-LLM_MODEL=gemini-2.5-flash-lite
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4096
-
-# Embeddings
-EMBEDDING_API_BASE=http://localhost:11434
-
-# Chunking
-CHUNK_SIZE=512
-CHUNK_OVERLAP=50
+EMBEDDING_API_KEY=
 ```
 
 ---
@@ -166,11 +176,17 @@ CHUNK_OVERLAP=50
 # Install dependencies
 uv sync
 
-# Run API server
+# Start API server (one-stop script)
+./start.sh
+
+# Or with auto-reload for development
+./start.sh --reload
+
+# Or manual start
 uv run uvicorn knowledge_base.main:app --reload --port 8088
 
 # Run CLI
-uv run kb --help
+uv run knowledge-base --help
 
 # Run tests
 uv run pytest

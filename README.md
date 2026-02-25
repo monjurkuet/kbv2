@@ -29,12 +29,15 @@ ollama pull bge-m3
 ollama serve
 
 # Ingest a document
-uv run kb ingest /path/to/document.md --domain BITCOIN
+uv run knowledge-base ingest /path/to/document.md --domain BITCOIN
 
 # Or with auto-detection
-uv run kb ingest /path/to/document.md
+uv run knowledge-base ingest /path/to/document.md
 
-# Start API server
+# Start API server (one-stop script)
+./start.sh
+
+# Or with manual command
 uv run uvicorn knowledge_base.main:app --reload --port 8088
 ```
 

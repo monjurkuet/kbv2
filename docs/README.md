@@ -4,9 +4,10 @@ This directory contains documentation for the KBV2 (Knowledge Base Version 2) sy
 
 ## Quick Start
 
-1. [Quick Start](../../QUICK_START.md) - Get started with ingestion in 5 minutes
-2. [Ingestion Guide](guides/ingestion.md) - Complete ingestion documentation
-3. [Deployment Guide](guides/deployment.md) - Production deployment instructions
+1. [Quick Start](../QUICK_START.md) - Get started in 5 minutes
+2. [Ingestion Guide](guides/ingestion.md) - Document ingestion methods
+3. [Deployment Guide](guides/deployment.md) - Production deployment
+4. [API Endpoints](api/endpoints.md) - API reference
 
 ---
 
@@ -14,51 +15,23 @@ This directory contains documentation for the KBV2 (Knowledge Base Version 2) sy
 
 ### Guides
 
-Comprehensive guides for using KBV2 features:
-
 - [Ingestion Guide](guides/ingestion.md) - Document ingestion methods and pipeline
 - [Deployment Guide](guides/deployment.md) - Production setup and configuration
-- [Self-Improvement Guide](guides/self_improvement.md) - Experience Bank, Prompt Evolution, Ontology Validation
-- [Available Features](guides/available_features.md) - Features not in main pipeline
+- [Available Features](guides/available_features.md) - Feature overview
 
 ### Architecture
 
-System architecture and design documentation:
-
-- [System Overview](architecture/overview.md) - High-level architecture and data flow
-- [Data Flow](architecture/data_flow.md) - Detailed data transformation pipeline
+- [System Overview](architecture/overview.md) - High-level architecture
+- [Data Flow](architecture/data_flow.md) - Data transformation pipeline
 
 ### API
 
-API documentation and reference:
-
-- [API Endpoints](api/endpoints.md) - Complete API reference for all endpoints
-
-### Database
-
-Database schema and relationships:
-
-- [Schema](database/schema.md) - Entity-Relationship diagrams and table definitions
+- [API Endpoints](api/endpoints.md) - Complete API reference
 
 ### Operations
 
-Operations and maintenance documentation:
-
-- [Setup Guide](operations/setup.md) - Installation and initial setup
-- [Runbook](operations/runbook.md) - Operations, monitoring, and troubleshooting
-
-### Development
-
-Development documentation:
-
-- [Folder Structure](development/folder_structure.md) - Directory structure and file organization
-
-### Archive
-
-Historical documentation and reports:
-
-- [Migration Reports](archive/migration_reports/) - OpenAI client migration, gateway consolidation
-- [Implementation Plans](archive/implementation_plans/) - Historical implementation plans
+- [Environment Configuration](operations/environment.md) - Configuration reference
+- [Runbook](operations/runbook.md) - Operations and troubleshooting
 
 ---
 
@@ -66,14 +39,23 @@ Historical documentation and reports:
 
 KBV2 transforms unstructured documents into a structured, temporally-aware knowledge graph using adaptive AI extraction techniques.
 
+### Storage Architecture (Portable)
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| SQLite | `data/knowledge.db` | Documents + FTS5 full-text search |
+| ChromaDB | `data/chroma/` | Vector embeddings (HNSW, 1024 dims) |
+| Kuzu | `data/knowledge_graph.kuzu` | Knowledge graph (Cypher queries) |
+
+**No external database servers required.**
+
 ### Key Components
 
 1. **Ingestion Pipeline** - Document parsing, chunking, domain detection
-2. **Entity Extraction** - Multi-agent, gleaning, guided extraction
-3. **Hybrid Search** - BM25 index, vector store (1024 dims), reranking
-4. **Graph Management** - Hierarchical clustering, community summaries
-5. **Query Engine** - Natural language to SQL, hybrid search, reranking
-6. **Self-Improvement** - Experience Bank, Prompt Evolution, Ontology Validation
+2. **Entity Extraction** - Multi-agent extraction with domain ontologies
+3. **Hybrid Search** - BM25 + Vector with reranking
+4. **Knowledge Graph** - Entities, relationships, community detection
+5. **RAG Pipeline** - 5 strategies for retrieval-augmented generation
 
 ### Supported Domains
 
@@ -90,11 +72,12 @@ KBV2 transforms unstructured documents into a structured, temporally-aware knowl
 
 ### Prerequisites
 
-- PostgreSQL 16+ with pgvector extension
 - Python 3.12+
 - uv package manager
 - Ollama (for embeddings)
 - OpenAI-compatible LLM API
+
+**No database setup required** - portable storage is embedded.
 
 ### Installation
 
@@ -104,92 +87,44 @@ uv sync
 
 # Setup environment
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your API keys
 
-# Run database migrations
-alembic upgrade head
-
-# Start Ollama
+# Start Ollama for embeddings
 ollama pull bge-m3
 ollama serve
 
 # Start server
-uv run python -m knowledge_base.production
+./start.sh
 ```
 
 ### Quick Ingestion
 
 ```bash
-# Direct ingestion (no server needed)
-./ingest_cli.py /path/to/document.md --domain BITCOIN
+# Via CLI
+uv run knowledge-base ingest /path/to/document.md --domain BITCOIN
 
-# Or with auto-detection
-./ingest_cli.py /path/to/document.md
+# Via API
+curl -X POST http://localhost:8088/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "/path/to/document.md", "domain": "BITCOIN"}'
 ```
-
----
-
-## Key Features
-
-### Adaptive Extraction
-
-- **Document Complexity Analysis** - LLM analyzes complexity and recommends strategy
-- **Random Model Selection** - Each LLM call uses a different model
-- **Error Rotation** - Automatic retry with different models on any error
-
-### Self-Improvement
-
-- **Experience Bank** - Stores high-quality extractions (quality ≥ 0.75) for few-shot learning
-- **Prompt Evolution** - Automated prompt optimization for 5 crypto domains
-- **Ontology Validation** - 15+ crypto-specific validation rules
-- **Domain Detection Feedback** - Learning from classification accuracy
-
-### Search Capabilities
-
-- **Hybrid Search** - BM25 + Vector with weighted fusion
-- **Reranking** - Cross-encoder for improved results
-- **RRF Fusion** - Reciprocal Rank Fusion for multi-query
 
 ---
 
 ## Technology Stack
 
 - **Backend:** FastAPI (Python 3.12)
-- **Database:** PostgreSQL with async SQLAlchemy
-- **Vector Search:** pgvector (1024-dim vectors, bge-m3)
-- **LLM Integration:** OpenAI SDK (AsyncOpenAI) with random model rotation
+- **Documents + FTS:** SQLite + FTS5
+- **Vector Store:** ChromaDB (HNSW, 1024 dims)
+- **Graph Database:** Kuzu (embedded, Cypher)
+- **LLM Integration:** OpenAI SDK (AsyncOpenAI)
 - **Embeddings:** Ollama (bge-m3, 1024 dimensions)
 - **Clustering:** igraph + leidenalg
-- **Testing:** Pytest with async support
-
----
-
-## Environment Variables
-
-```bash
-# Database
-DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
-
-# LLM Configuration
-LLM_API_BASE=http://localhost:8087/v1
-LLM_API_KEY=sk-dummy
-
-# Embedding Configuration
-EMBEDDING_API_BASE=http://localhost:11434
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
-
-# Self-Improvement Features
-ENABLE_EXPERIENCE_BANK=true
-ENABLE_PROMPT_EVOLUTION=true
-ENABLE_ONTOLOGY_VALIDATION=true
-```
+- **Testing:** pytest with async support
 
 ---
 
 ## Development
-
-### Code Quality
 
 ```bash
 # Lint
@@ -205,39 +140,10 @@ uv run mypy src/
 uv run pytest tests/
 ```
 
-### Project Structure
-
-```
-kbv2/
-├── src/knowledge_base/          # Source code
-│   ├── clients/                  # LLM and WebSocket clients
-│   ├── intelligence/v1/         # AI services
-│   ├── ingestion/v1/            # Document processing
-│   ├── persistence/v1/          # Database layer
-│   └── orchestration/            # Pipeline orchestration
-├── docs/                        # Documentation
-├── tests/                       # Test suite
-└── alembic/                     # Database migrations
-```
-
----
-
-## Support
-
-- **Issues:** Report bugs and feature requests at the project repository
-- **Questions:** Check existing documentation and issues first
-- **Contributions:** Follow Google Python Style Guide and existing patterns
-
 ---
 
 ## Related Documentation
 
-- [README](../../README.md) - Project overview
-- [QUICK_START](../../QUICK_START.md) - Quick start guide
-- [AGENTS.md](../../AGENTS.md) - Agent instructions
-
----
-
-## License
-
-MIT
+- [README](../README.md) - Project overview
+- [QUICK_START](../QUICK_START.md) - Quick start guide
+- [CLAUDE.md](../CLAUDE.md) - Development guidelines

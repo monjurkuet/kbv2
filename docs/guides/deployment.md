@@ -2,146 +2,90 @@
 
 ## Overview
 
-This guide covers production deployment of the KBV2 knowledge base system, including environment setup, database configuration, and monitoring.
+KBV2 uses a **portable storage architecture** - no external database servers required. All data is stored in local files, making deployment simple and portable.
 
 ---
 
 ## Prerequisites
 
-- **PostgreSQL 16+** with pgvector extension
 - **Python 3.12+**
 - **uv** package manager
 - **Ollama** for embeddings (localhost:11434)
 - **OpenAI-compatible LLM API** (localhost:8087/v1)
 
----
-
-## Step 1: Database Setup
-
-### Install PostgreSQL and pgvector
-
-```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install postgresql-16 postgresql-contrib-16
-
-# Install pgvector
-cd /tmp
-git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git
-cd pgvector
-make
-sudo make install
-```
-
-### Create Database
-
-```bash
-# Start PostgreSQL
-sudo systemctl start postgresql
-
-# Create database and user
-sudo -u postgres psql <<EOF
-CREATE DATABASE knowledge_base;
-CREATE USER agentzero;
-GRANT ALL PRIVILEGES ON DATABASE knowledge_base TO agentzero;
-\c knowledge_base
-CREATE EXTENSION vector;
-GRANT ALL ON SCHEMA public TO agentzero;
-EOF
-```
-
-### Configure PostgreSQL
-
-Edit `/etc/postgresql/16/main/postgresql.conf`:
-
-```ini
-shared_preload_libraries = 'vector'
-maintenance_work_mem = '4GB'
-```
-
-Restart PostgreSQL:
-```bash
-sudo systemctl restart postgresql
-```
+**No database setup required** - SQLite, ChromaDB, and Kuzu are embedded.
 
 ---
 
-## Step 2: Environment Configuration
-
-### Create Environment File
+## Quick Start
 
 ```bash
-cp .env.example .env
-```
-
-Edit `.env` with your settings:
-
-```bash
-# Database
-DATABASE_URL=postgresql://agentzero@localhost/knowledge_base
-
-# LLM Configuration (OpenAI-compatible API)
-LLM_API_BASE=http://localhost:8087/v1
-LLM_API_KEY=sk-dummy
-
-# Embedding Configuration (Ollama)
-EMBEDDING_API_BASE=http://localhost:11434
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
-
-# Self-Improvement Features
-ENABLE_EXPERIENCE_BANK=true
-ENABLE_PROMPT_EVOLUTION=true
-ENABLE_ONTOLOGY_VALIDATION=true
-
-# Monitoring
-ENABLE_METRICS=true
-METRICS_PORT=9090
-HEALTH_CHECK_PORT=8080
-```
-
----
-
-## Step 3: Install Dependencies
-
-```bash
-# Install uv if not already installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install project dependencies
+# Install dependencies
 uv sync
+
+# Setup environment
+cp .env.example .env
+# Edit .env with your API keys (secrets only)
+# Edit config.yaml for all other settings
+
+# Start server
+./start.sh
 ```
 
 ---
 
-## Step 4: Run Database Migrations
+## Configuration
 
-```bash
-# Verify current migration status
-alembic current
+### config.yaml (Non-Secret Settings)
 
-# Run all migrations
-alembic upgrade head
+```yaml
+storage:
+  data_dir: data
 
-# Expected output: experience_bank_001
+llm:
+  gateway_url: http://localhost:8087/v1/
+  model: gemini-2.5-flash-lite
+  temperature: 0.7
+  max_tokens: 4096
+
+embedding:
+  api_base: http://localhost:11434
+  model: bge-m3
+  dimension: 1024
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 50
+
+server:
+  host: 0.0.0.0
+  port: 8088
 ```
 
-### Verify Migration
+### .env (Secrets Only)
 
 ```bash
-# Check tables exist
-psql -d knowledge_base -c "\dt"
-
-# Check extraction_experiences table
-psql -d knowledge_base -c "\d extraction_experiences"
-
-# Check vector dimensions (should be 1024)
-psql -d knowledge_base -c "SELECT atttypmod FROM pg_attribute WHERE attname = 'embedding' AND attrelid = 'entities'::regclass;"
+LLM_API_KEY=your-api-key-here
+EMBEDDING_API_KEY=your-api-key-here
 ```
 
 ---
 
-## Step 5: Start Ollama for Embeddings
+## Storage Architecture
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| SQLite | `data/knowledge.db` | Documents + FTS5 full-text search |
+| ChromaDB | `data/chroma/` | Vector similarity (HNSW, 1024 dims) |
+| Kuzu | `data/knowledge_graph.kuzu` | Knowledge graph (Cypher queries) |
+
+**All data is portable** - just copy the `data/` directory to migrate or backup.
+
+---
+
+## Starting Services
+
+### Start Ollama (Embeddings)
 
 ```bash
 # Pull bge-m3 model
@@ -154,35 +98,48 @@ ollama serve
 curl http://localhost:11434/api/tags
 ```
 
----
+### Start LLM Gateway
 
-## Step 6: Start Production Server
-
-### Using uvicorn directly
+Ensure your OpenAI-compatible LLM API is running at `http://localhost:8087/v1`.
 
 ```bash
-# Start server
-uv run python -m knowledge_base.production
-
-# Or with custom host/port
-PORT=8765 HOST=0.0.0.0 uv run python -m knowledge_base.production
+# Verify
+curl http://localhost:8087/v1/models
 ```
 
-### Using systemd service
+### Start KBV2 Server
+
+```bash
+# One-stop start script (recommended)
+./start.sh
+
+# Or with auto-reload for development
+./start.sh --reload
+
+# Or custom port
+./start.sh --port 9000
+
+# Or manual
+uv run uvicorn knowledge_base.main:app --host 0.0.0.0 --port 8088
+```
+
+---
+
+## Systemd Service (Production)
 
 Create `/etc/systemd/system/kbv2.service`:
 
 ```ini
 [Unit]
 Description=KBV2 Knowledge Base
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 Type=simple
-User=agentzero
-WorkingDirectory=/home/muham/development/kbv2
-Environment="PATH=/home/muham/.local/bin:/usr/bin:/bin"
-ExecStart=/home/muham/.local/bin/uv run python -m knowledge_base.production
+User=youruser
+WorkingDirectory=/path/to/kbv2
+Environment="PATH=/home/youruser/.local/bin:/usr/bin:/bin"
+ExecStart=/path/to/kbv2/start.sh
 Restart=always
 RestartSec=10
 
@@ -191,6 +148,7 @@ WantedBy=multi-user.target
 ```
 
 Enable and start:
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable kbv2
@@ -200,369 +158,169 @@ sudo systemctl status kbv2
 
 ---
 
-## Step 7: Verify Deployment
+## Verification
 
 ### Health Check
 
 ```bash
-# Basic health check
-curl http://localhost:8765/health
-
-# Extended health check (v2)
-curl http://localhost:8765/api/v2/health
-
-# Expected response:
-# {
-#   "status": "healthy",
-#   "version": "2.0.0",
-#   "components": {
-#     "database": true,
-#     "self_improving_orchestrator": true,
-#     "experience_bank": true
-#   }
-# }
+curl http://localhost:8088/health
+# Expected: {"status": "healthy", "version": "0.2.0", ...}
 ```
 
 ### Statistics
 
 ```bash
-# Get statistics
-curl http://localhost:8765/api/v2/stats
-
-# Get Prometheus metrics
-curl http://localhost:8765/metrics
+curl http://localhost:8088/stats
 ```
 
 ### Test Ingestion
 
 ```bash
-# Ingest a test document
-./ingest_cli.py test_data/markdown/sample_bitcoin_document.md --domain BITCOIN
-
-# Or via API
-curl -X POST "http://localhost:8765/api/v2/documents/process" \
+curl -X POST http://localhost:8088/ingest \
   -H "Content-Type: application/json" \
   -d '{"file_path": "test_data/markdown/sample_bitcoin_document.md", "domain": "BITCOIN"}'
 ```
 
 ---
 
-## Monitoring
+## Backup and Recovery
 
-### Prometheus Integration
+### Backup
 
-Add to `prometheus.yml`:
+```bash
+# Simple backup - just copy data directory
+tar -czf kbv2_backup_$(date +%Y%m%d).tar.gz data/
 
-```yaml
-scrape_configs:
-  - job_name: 'kbv2'
-    static_configs:
-      - targets: ['localhost:8765']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
+# Or for continuous backup, sync to another location
+rsync -av data/ /backup/kbv2/
 ```
 
-### Key Metrics
+### Recovery
 
-- `kb_documents_processed_total` - Total documents processed
-- `kb_extraction_quality_avg` - Average extraction quality
-- `kb_experience_bank_hit_rate` - Experience Bank hit rate
-- `kb_llm_calls_total` - Total LLM calls
-- `kb_llm_failures_total` - Total LLM failures
+```bash
+# Stop server
+sudo systemctl stop kbv2
+# Or: pkill -f "uvicorn knowledge_base"
 
-### Grafana Dashboard
+# Restore from backup
+tar -xzf kbv2_backup_20260208.tar.gz
 
-Import dashboard JSON (simplified):
-
-```json
-{
-  "dashboard": {
-    "title": "KBV2 Monitoring",
-    "panels": [
-      {
-        "title": "Documents Processed",
-        "targets": [{"expr": "kb_documents_processed_total"}]
-      },
-      {
-        "title": "Extraction Quality",
-        "targets": [{"expr": "kb_extraction_quality_avg"}]
-      },
-      {
-        "title": "Experience Bank Hit Rate",
-        "targets": [{"expr": "kb_experience_bank_hit_rate"}]
-      }
-    ]
-  }
-}
+# Restart server
+./start.sh
 ```
 
 ---
 
-## Maintenance
+## Monitoring
 
-### Daily Checks
+### Health Endpoints
 
-```bash
-# Check health
-curl http://localhost:8765/api/v2/health
+- `/health` - Basic health check
+- `/stats` - Storage statistics
 
-# Check stats
-curl http://localhost:8765/api/v2/stats
-
-# Check database connections
-psql -d knowledge_base -c "SELECT count(*) FROM pg_stat_activity WHERE datname = 'knowledge_base';"
-```
-
-### Weekly Tasks
+### Log Monitoring
 
 ```bash
-# Database maintenance
-psql -d knowledge_base -c "VACUUM ANALYZE;"
+# View server logs
+journalctl -u kbv2 -f
 
-# Check Experience Bank growth
-psql -d knowledge_base -c "SELECT domain, COUNT(*) FROM extraction_experiences GROUP BY domain;"
-
-# Review logs
-tail -f /tmp/kbv2_ingestion.log
-```
-
-### Monthly Tasks
-
-```bash
-# Check table sizes
-psql -d knowledge_base -c "
-  SELECT 
-    schemaname,
-    tablename,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
-  FROM pg_tables
-  WHERE schemaname = 'public'
-  ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-"
-
-# Backup database
-pg_dump -h localhost -U agentzero knowledge_base | gzip > kbv2_backup_$(date +%Y%m%d).sql.gz
-
-# Check index usage
-psql -d knowledge_base -c "
-  SELECT 
-    schemaname,
-    tablename,
-    indexname,
-    idx_scan,
-    idx_tup_read,
-    idx_tup_fetch
-  FROM pg_stat_user_indexes
-  ORDER BY idx_scan ASC;
-"
+# Or if running manually, redirect to file:
+./start.sh 2>&1 | tee -a kbv2.log
 ```
 
 ---
 
 ## Troubleshooting
 
-### Issue: Migration Failed
+### Port Already in Use
 
-**Solution:**
 ```bash
-# Check current version
-alembic current
+# Find process on port
+lsof -i :8088
 
-# Fix version mismatch
-psql -d knowledge_base -c "UPDATE alembic_version SET version_num = '0003_upgrade_to_1024_dimensions';"
+# Kill process
+kill -9 <PID>
 
-# Retry migration
-alembic upgrade head
+# Or use start.sh which handles this automatically
+./start.sh
 ```
 
-### Issue: High Memory Usage
+### Ollama Not Running
 
-**Solution:**
-- Reduce Experience Bank size in config
-- Reduce concurrent document processing
-- Enable garbage collection
-
-### Issue: Low Experience Bank Hit Rate
-
-**Solution:**
-- Wait for more documents (need baseline experiences)
-- Lower quality threshold temporarily
-- Check domain distribution
-
-### Issue: Embedding Failures
-
-**Solution:**
 ```bash
-# Check Ollama status
+# Check status
 curl http://localhost:11434/api/tags
 
-# Restart Ollama
-pkill ollama
+# Start Ollama
 ollama serve
 
-# Verify bge-m3 model
+# Pull model if needed
 ollama pull bge-m3
 ```
 
-### Issue: LLM API Unavailable
+### LLM Gateway Unavailable
 
-**Solution:**
 ```bash
 # Check API health
-curl http://localhost:8087/v1/health
-
-# Check available models
 curl http://localhost:8087/v1/models
 
-# Verify environment variable
-echo $LLM_API_BASE
+# Verify gateway is running
+# (depends on your LLM gateway setup)
+```
+
+### Import Errors
+
+```bash
+# Verify installation
+uv run python -c "from knowledge_base import __version__; print(__version__)"
+
+# Reinstall if needed
+uv sync --reinstall
 ```
 
 ---
 
-## Scaling
+## Performance Considerations
 
-### Horizontal Scaling
+### Storage Size
 
-Run multiple instances behind load balancer:
+- SQLite database grows with documents and chunks
+- ChromaDB stores 1024-dim vectors (~4KB per chunk)
+- Kuzu stores entities and relationships
 
-```bash
-# Instance 1
-PORT=8765 uv run python -m knowledge_base.production
+### Memory Usage
 
-# Instance 2
-PORT=8766 uv run python -m knowledge_base.production
+- Embedding generation: ~2GB with bge-m3
+- LLM calls: depends on model and concurrent requests
+- Server overhead: ~500MB
 
-# Instance 3
-PORT=8767 uv run python -m knowledge_base.production
-```
+### Concurrency
 
-### Database Read Replicas
-
-Configure read replicas for query offload:
-
-```bash
-# In .env
-DATABASE_URL=postgresql://agentzero@primary:5432/knowledge_base
-DATABASE_READ_URL=postgresql://agentzero@replica:5432/knowledge_base
-```
-
-### Caching
-
-Consider Redis for:
-- Session caching
-- Query result caching
-- Experience Bank caching
+- SQLite handles concurrent reads well
+- Writes are serialized at database level
+- Use connection pooling (built-in)
 
 ---
 
 ## Security
 
-### Secrets Management
-
-Never commit `.env` file. Use secret management:
-- HashiCorp Vault
-- AWS Secrets Manager
-- Kubernetes Secrets
-
 ### Network Security
 
 ```bash
-# Firewall rules
-sudo ufw allow 8765/tcp  # API port
-sudo ufw allow 5432/tcp  # PostgreSQL (if remote)
+# Firewall rules (if needed)
+sudo ufw allow 8088/tcp  # API port
 sudo ufw deny 11434/tcp  # Ollama (local only)
-sudo ufw deny 8087/tcp  # LLM API (local only)
+sudo ufw deny 8087/tcp   # LLM API (local only)
 ```
 
-### Authentication
+### API Authentication
 
-Enable API authentication in production:
-
-```python
-# In production.py
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
-
-security = HTTPBearer()
-
-async def verify_token(token: str = Depends(security)):
-    if token.credentials != os.getenv("API_TOKEN"):
-        raise HTTPException(status_code=401)
-    return token
-
-@app.get("/api/v2/secure-endpoint", dependencies=[Depends(verify_token)])
-async def secure_endpoint():
-    return {"status": "authenticated"}
-```
-
----
-
-## Backup and Recovery
-
-### Backup Strategy
-
-```bash
-# Daily automated backup
-0 2 * * * pg_dump -h localhost -U agentzero knowledge_base | gzip > /backup/kbv2_$(date +\%Y\%m\%d).sql.gz
-
-# Keep last 30 days
-find /backup -name "kbv2_*.sql.gz" -mtime +30 -delete
-```
-
-### Recovery
-
-```bash
-# Stop application
-sudo systemctl stop kbv2
-
-# Drop and recreate database
-psql -U postgres -c "DROP DATABASE knowledge_base;"
-psql -U postgres -c "CREATE DATABASE knowledge_base;"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE knowledge_base TO agentzero;"
-
-# Restore from backup
-gunzip -c /backup/kbv2_20260208.sql.gz | psql -h localhost -U agentzero knowledge_base
-
-# Restart application
-sudo systemctl start kbv2
-```
-
----
-
-## Performance Tuning
-
-### PostgreSQL Configuration
-
-```ini
-# postgresql.conf
-shared_buffers = 4GB
-effective_cache_size = 12GB
-maintenance_work_mem = 1GB
-work_mem = 256MB
-max_connections = 100
-```
-
-### Connection Pooling
-
-Use PgBouncer for connection pooling:
-
-```ini
-# pgbouncer.ini
-[databases]
-knowledge_base = host=localhost port=5432 dbname=knowledge_base
-
-[pgbouncer]
-pool_mode = transaction
-max_client_conn = 100
-default_pool_size = 25
-```
+For production, add authentication middleware in `main.py` or use a reverse proxy with auth.
 
 ---
 
 ## Related Documentation
 
+- [Quick Start](../QUICK_START.md)
+- [API Endpoints](../api/endpoints.md)
 - [Ingestion Guide](ingestion.md)
-- [Self-Improvement Features](self_improvement.md)
-- [Setup Guide](operations/setup.md)
-- [Operations Runbook](operations/runbook.md)
