@@ -648,7 +648,7 @@ class SQLiteStore:
         """
         def _search():
             with self._get_db() as conn:
-                # Use BM25 for ranking
+                # Use BM25 for ranking with rowid-based join for FTS5
                 rows = conn.execute("""
                     SELECT
                         c.id as chunk_id,
@@ -658,7 +658,7 @@ class SQLiteStore:
                         c.metadata,
                         bm25(chunks_fts) as score
                     FROM chunks_fts
-                    JOIN chunks c ON chunks_fts.chunk_id = c.id
+                    JOIN chunks c ON chunks_fts.rowid = c.rowid
                     JOIN documents d ON c.document_id = d.id
                     WHERE chunks_fts MATCH ?
                     ORDER BY score

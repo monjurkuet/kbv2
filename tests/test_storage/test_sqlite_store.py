@@ -99,7 +99,6 @@ class TestSQLiteStore:
         assert chunk_id is not None
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="FTS search has a bug - no such column: T.chunk_id")
     async def test_fts_search(self, sqlite_store):
         """Test full-text search."""
         await sqlite_store.initialize()
