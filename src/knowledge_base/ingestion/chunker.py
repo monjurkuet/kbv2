@@ -45,6 +45,19 @@ class Chunk(BaseModel):
     metadata: ChunkMetadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+    def to_db_dict(self) -> dict:
+        """Convert to database dictionary format compatible with sqlite_store."""
+        return {
+            "id": self.id,
+            "document_id": self.document_id,
+            "text": self.text,
+            "chunk_index": self.chunk_index,
+            "token_count": self.metadata.token_count if self.metadata else None,
+            "page_number": self.metadata.page_number if self.metadata else None,
+            "metadata": self.metadata.model_dump_json() if self.metadata else "{}",
+            "created_at": self.created_at.isoformat(),
+        }
+
 
 @dataclass
 class ChunkingConfig:
