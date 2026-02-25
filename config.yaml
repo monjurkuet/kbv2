@@ -32,3 +32,12 @@ server:
   host: 0.0.0.0
   port: 8088
   websocket_port: 8765
+
+cors:
+  # Set to ["*"] for development only! In production, specify allowed origins
+  allow_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8088"
+  allow_credentials: false
+  allow_methods: ["GET", "POST", "PUT", "DELETE"]
+  allow_headers: ["*"]

@@ -219,7 +219,7 @@ Format as a JSON array of strings."""
 
             follow_ups = result.data
             if isinstance(follow_ups, list):
-                return [q for q in follow_ups if isinstance(q, string)][:3]
+                return [q for q in follow_ups if isinstance(q, str)][:3]
         except Exception as e:
             logger.debug(f"Failed to generate follow-ups: {e}")
 
@@ -311,5 +311,5 @@ Then provide your answer with source citations.
         )
 
 
-# Import for type hints
-import string
+# Constants for answer generation
+MAX_CONTEXT_LENGTH = 4000

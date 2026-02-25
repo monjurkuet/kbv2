@@ -60,9 +60,17 @@ def ingest(
     domain: Optional[str] = typer.Option(None, "--domain", "-d", help="Document domain"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Process directories recursively"),
 ):
-    """Ingest documents into the knowledge base."""
-    from knowledge_base.storage.portable import SQLiteStore, PortableStorageConfig
+    """Ingest documents into the knowledge base.
+
+    This command:
+    1. Processes documents (text extraction)
+    2. Chunks content
+    3. Stores chunks in SQLite
+    4. Generates embeddings and stores in ChromaDB
+    """
+    from knowledge_base.storage.portable import SQLiteStore, ChromaStore, PortableStorageConfig
     from knowledge_base.ingestion import DocumentProcessor, SemanticChunker, VisionModelClient
+    from knowledge_base.clients.embedding import EmbeddingClient
 
     async def _ingest():
         config = PortableStorageConfig()
@@ -71,6 +79,13 @@ def ingest(
         # Initialize stores
         sqlite = SQLiteStore(config.sqlite)
         await sqlite.initialize()
+
+        chroma = ChromaStore(config.chroma)
+        await chroma.initialize()
+
+        # Initialize embedding client
+        embedding_client = EmbeddingClient()
+        await embedding_client.initialize()
 
         # Initialize vision client
         vision = VisionModelClient()
@@ -92,6 +107,7 @@ def ingest(
 
                     docs = await processor.process_directory(file_path, recursive=recursive)
 
+                    total_embeddings = 0
                     for doc in docs:
                         progress.update(task, description=f"Processing: {doc.name}")
 
@@ -109,11 +125,27 @@ def ingest(
 
                         # Chunk and save
                         chunks = chunker.chunk(doc.content, doc_id)
-                        await sqlite.add_chunks_batch(chunks)
+                        chunk_ids = await sqlite.add_chunks_batch(chunks)
 
-                    progress.update(task, description=f"Completed: {len(docs)} documents")
+                        # Generate and store embeddings
+                        if chunks:
+                            texts = [c.text for c in chunks]
+                            embeddings = await embedding_client.embed_batch(texts)
+                            metadatas = [
+                                {"document_id": doc_id, "chunk_index": c.chunk_index, "domain": domain or "GENERAL"}
+                                for c in chunks
+                            ]
+                            await chroma.add_embeddings(
+                                ids=chunk_ids,
+                                embeddings=embeddings,
+                                metadatas=metadatas,
+                                documents=texts,
+                            )
+                            total_embeddings += len(chunk_ids)
 
-                console.print(f"[green]✓ Ingested {len(docs)} documents[/green]")
+                    progress.update(task, description=f"Completed: {len(docs)} documents, {total_embeddings} embeddings")
+
+                console.print(f"[green]✓ Ingested {len(docs)} documents ({total_embeddings} embeddings)[/green]")
 
             else:
                 # Process single file
@@ -133,12 +165,31 @@ def ingest(
                 doc_id = await sqlite.add_document(document)
 
                 chunks = chunker.chunk(doc.content, doc_id)
-                await sqlite.add_chunks_batch(chunks)
+                chunk_ids = await sqlite.add_chunks_batch(chunks)
 
-                console.print(f"[green]✓ Ingested: {doc.name} ({len(chunks)} chunks)[/green]")
+                # Generate and store embeddings
+                embedding_count = 0
+                if chunks:
+                    texts = [c.text for c in chunks]
+                    embeddings = await embedding_client.embed_batch(texts)
+                    metadatas = [
+                        {"document_id": doc_id, "chunk_index": c.chunk_index, "domain": domain or "GENERAL"}
+                        for c in chunks
+                    ]
+                    await chroma.add_embeddings(
+                        ids=chunk_ids,
+                        embeddings=embeddings,
+                        metadatas=metadatas,
+                        documents=texts,
+                    )
+                    embedding_count = len(chunk_ids)
+
+                console.print(f"[green]✓ Ingested: {doc.name} ({len(chunks)} chunks, {embedding_count} embeddings)[/green]")
 
         finally:
+            await embedding_client.close()
             await vision.close()
+            await chroma.close()
             await sqlite.close()
 
     asyncio.run(_ingest())
@@ -149,13 +200,14 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-l", help="Maximum results"),
 ):
-    """Search the knowledge base."""
+    """Search the knowledge base using hybrid search (BM25 + vector)."""
     from knowledge_base.storage.portable import (
         SQLiteStore,
         ChromaStore,
         HybridSearchEngine,
         PortableStorageConfig,
     )
+    from knowledge_base.clients.embedding import EmbeddingClient
 
     async def _search():
         config = PortableStorageConfig()
@@ -166,9 +218,16 @@ def search(
         chroma = ChromaStore(config.chroma)
         await chroma.initialize()
 
+        embedding_client = EmbeddingClient()
+        await embedding_client.initialize()
+
         engine = HybridSearchEngine(sqlite, chroma)
 
-        results = await engine.search(query, limit=limit)
+        # Generate query embedding for vector search
+        query_embedding = await embedding_client.embed_query(query)
+
+        # Perform hybrid search
+        results = await engine.search(query, query_embedding=query_embedding, limit=limit)
 
         # Display results
         table = Table(title=f"Search Results: {query}")
@@ -186,6 +245,7 @@ def search(
 
         console.print(table)
 
+        await embedding_client.close()
         await sqlite.close()
         await chroma.close()
 

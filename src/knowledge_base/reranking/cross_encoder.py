@@ -10,7 +10,6 @@ scoring than bi-encoder approaches.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
-import asyncio
 import logging
 
 from sentence_transformers import CrossEncoder
@@ -42,18 +41,12 @@ class RerankedSearchResult(BaseModel):
     vector_score: float = Field(default=0.0, description="Normalized vector similarity")
     bm25_score: float = Field(default=0.0, description="Normalized BM25 score")
     final_score: float = Field(default=0.0, description="Combined fusion score")
-    cross_encoder_score: float = Field(
-        default=0.0, description="Cross-encoder relevance score"
-    )
+    cross_encoder_score: float = Field(default=0.0, description="Cross-encoder relevance score")
     reranked_score: float = Field(
         default=0.0, description="Final score after cross-encoder reranking"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
-        default=None, description="Document metadata"
-    )
-    source: str = Field(
-        default="hybrid", description="Result source: vector, bm25, or hybrid"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Document metadata")
+    source: str = Field(default="hybrid", description="Result source: vector, bm25, or hybrid")
 
 
 class CrossEncoderReranker:
@@ -189,9 +182,7 @@ class CrossEncoderReranker:
             ValueError: If top_k is negative or batch_size is invalid.
         """
         if not self._initialized:
-            raise RuntimeError(
-                "CrossEncoderReranker not initialized. Call initialize() first."
-            )
+            raise RuntimeError("CrossEncoderReranker not initialized. Call initialize() first.")
 
         if top_k < 0:
             raise ValueError("top_k must be non-negative")
@@ -204,9 +195,7 @@ class CrossEncoderReranker:
 
         documents = [cand.text for cand in candidates]
 
-        ce_scores = await self.score_batch(
-            query=query, documents=documents, batch_size=batch_size
-        )
+        ce_scores = await self.score_batch(query=query, documents=documents, batch_size=batch_size)
 
         reranked_results: List[RerankedSearchResult] = []
         for candidate, ce_score in zip(candidates, ce_scores):
@@ -255,9 +244,7 @@ class CrossEncoderReranker:
             RuntimeError: If the model is not initialized.
         """
         if not self._initialized:
-            raise RuntimeError(
-                "CrossEncoderReranker not initialized. Call initialize() first."
-            )
+            raise RuntimeError("CrossEncoderReranker not initialized. Call initialize() first.")
 
         if not candidates:
             return [], []
@@ -286,9 +273,7 @@ class CrossEncoderReranker:
             RuntimeError: If the model is not initialized.
         """
         if not self._initialized:
-            raise RuntimeError(
-                "CrossEncoderReranker not initialized. Call initialize() first."
-            )
+            raise RuntimeError("CrossEncoderReranker not initialized. Call initialize() first.")
 
         if not query or not document:
             return 0.0
@@ -321,9 +306,7 @@ class CrossEncoderReranker:
             ValueError: If documents is empty or batch_size is invalid.
         """
         if not self._initialized:
-            raise RuntimeError(
-                "CrossEncoderReranker not initialized. Call initialize() first."
-            )
+            raise RuntimeError("CrossEncoderReranker not initialized. Call initialize() first.")
 
         if not documents:
             return []

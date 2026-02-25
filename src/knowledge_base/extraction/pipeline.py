@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union
-from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -132,9 +131,9 @@ class ExtractionPipeline:
                 entities = self._deduplicate_entities(entities)
 
             # Extract key concepts
-            key_concepts = list(set(
-                c.name for c in (concepts if isinstance(concepts, list) else [])
-            ))[:10]
+            key_concepts = list(
+                set(c.name for c in (concepts if isinstance(concepts, list) else []))
+            )[:10]
 
             return VideoAnalysis(
                 video_id=video_id,
@@ -142,7 +141,9 @@ class ExtractionPipeline:
                 channel=channel,
                 price_targets=price_targets if isinstance(price_targets, list) else [],
                 trading_setups=trading_setups if isinstance(trading_setups, list) else [],
-                market_analysis=market_analysis if isinstance(market_analysis, MarketAnalysis) else None,
+                market_analysis=market_analysis
+                if isinstance(market_analysis, MarketAnalysis)
+                else None,
                 entities=entities if isinstance(entities, list) else [],
                 relationships=relationships if isinstance(relationships, list) else [],
                 educational_concepts=concepts if isinstance(concepts, list) else [],
@@ -209,7 +210,9 @@ class ExtractionPipeline:
                 entities=entities if isinstance(entities, list) else [],
                 relationships=relationships if isinstance(relationships, list) else [],
                 educational_concepts=concepts if isinstance(concepts, list) else [],
-                key_concepts=list(set(c.name for c in (concepts if isinstance(concepts, list) else [])))[:10],
+                key_concepts=list(
+                    set(c.name for c in (concepts if isinstance(concepts, list) else []))
+                )[:10],
                 summary=summary if isinstance(summary, str) else None,
                 extraction_metadata={
                     "extracted_at": datetime.utcnow().isoformat(),
@@ -296,7 +299,10 @@ class ExtractionPipeline:
                             "risk_reward_ratio": {"type": "number"},
                             "timeframe": {"type": "string"},
                             "confidence": {"type": "string"},
-                            "invalidation_conditions": {"type": "array", "items": {"type": "string"}},
+                            "invalidation_conditions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
                             "source_text": {"type": "string"},
                         },
                         "required": ["symbol", "setup_type"],
@@ -429,7 +435,10 @@ class ExtractionPipeline:
             for item in result.data.get("relationships", []):
                 try:
                     # Validate entity names exist
-                    if item.get("source_entity") in entity_names and item.get("target_entity") in entity_names:
+                    if (
+                        item.get("source_entity") in entity_names
+                        and item.get("target_entity") in entity_names
+                    ):
                         relationships.append(ExtractedRelationship(**item))
                 except Exception as e:
                     logger.warning(f"Invalid relationship: {e}")
@@ -462,7 +471,10 @@ class ExtractionPipeline:
                             "key_points": {"type": "array", "items": {"type": "string"}},
                             "examples": {"type": "array", "items": {"type": "string"}},
                             "related_concepts": {"type": "array", "items": {"type": "string"}},
-                            "practical_applications": {"type": "array", "items": {"type": "string"}},
+                            "practical_applications": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
                             "common_mistakes": {"type": "array", "items": {"type": "string"}},
                             "source_text": {"type": "string"},
                         },

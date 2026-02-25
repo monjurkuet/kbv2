@@ -110,7 +110,9 @@ class HybridSearchEngine:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         bm25_results = results[0] if not isinstance(results[0], Exception) else []
-        vector_results = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else []
+        vector_results = (
+            results[1] if len(results) > 1 and not isinstance(results[1], Exception) else []
+        )
 
         # Combine with RRF
         combined = self._reciprocal_rank_fusion(bm25_results, vector_results, limit)
@@ -256,16 +258,18 @@ class HybridSearchEngine:
         results = []
         for item in sorted_results[:limit]:
             if item["rrf_score"] >= self._config.min_score:
-                results.append(HybridSearchResult(
-                    chunk_id=item["chunk_id"],
-                    document_id=item["document_id"],
-                    text=item["text"],
-                    score=item["rrf_score"],
-                    bm25_score=item["bm25_score"],
-                    vector_score=item["vector_score"],
-                    document_name=item["document_name"],
-                    metadata=item["metadata"],
-                ))
+                results.append(
+                    HybridSearchResult(
+                        chunk_id=item["chunk_id"],
+                        document_id=item["document_id"],
+                        text=item["text"],
+                        score=item["rrf_score"],
+                        bm25_score=item["bm25_score"],
+                        vector_score=item["vector_score"],
+                        document_name=item["document_name"],
+                        metadata=item["metadata"],
+                    )
+                )
 
         return results
 
@@ -309,88 +313,6 @@ class HybridSearchEngine:
 
         return expanded_results
 
-    async def search_with_reranking(
-        self,
-        query: str,
-        query_embedding: list[float],
-        reranker: Optional[Any] = None,
-        limit: int = 10,
-        initial_limit: int = 50,
-    ) -> list[HybridSearchResult]:
-        """Search with cross-encoder reranking.
-
-        This method:
-        1. Performs hybrid search to get initial candidates
-        2. Reranks using a cross-encoder model for better relevance
-
-        Args:
-            query: Search query text.
-            query_embedding: Query vector.
-            reranker: Cross-encoder reranker instance.
-            limit: Final number of results.
-            initial_limit: Initial candidates to retrieve.
-
-        Returns:
-            Reranked search results.
-        """
-        # Get initial results
-        results = await self.search(
-            query=query,
-            query_embedding=query_embedding,
-            limit=initial_limit,
-        )
-
-        if not results or not reranker:
-            return results[:limit]
-
-        # Rerank using cross-encoder
-        try:
-            texts = [r.text for r in results if r.text]
-            if texts:
-                rerank_scores = await self._rerank(query, texts, reranker)
-
-                # Update scores with rerank scores
-                for i, result in enumerate(results):
-                    if i < len(rerank_scores):
-                        result.score = rerank_scores[i]
-
-                # Re-sort by rerank score
-                results.sort(key=lambda x: x.score, reverse=True)
-        except Exception as e:
-            logger.error(f"Reranking failed: {e}")
-
-        return results[:limit]
-
-    async def _rerank(
-        self,
-        query: str,
-        documents: list[str],
-        reranker: Any,
-    ) -> list[float]:
-        """Rerank documents using cross-encoder.
-
-        Args:
-            query: Query text.
-            documents: List of documents to rerank.
-            reranker: Cross-encoder reranker.
-
-        Returns:
-            List of rerank scores.
-        """
-        # This can be implemented with sentence-transformers CrossEncoder
-        # or other reranking models
-        if hasattr(reranker, "predict"):
-            # Synchronous cross-encoder
-            pairs = [[query, doc] for doc in documents]
-            scores = reranker.predict(pairs)
-            return scores.tolist() if hasattr(scores, "tolist") else list(scores)
-        elif hasattr(reranker, "arank"):
-            # Async reranker
-            results = await reranker.arank(query, documents)
-            return [r["score"] for r in results]
-
-        return [1.0] * len(documents)
-
     async def multi_query_search(
         self,
         queries: list[str],
@@ -412,7 +334,9 @@ class HybridSearchEngine:
         """
         tasks = []
         for i, query in enumerate(queries):
-            embedding = query_embeddings[i] if query_embeddings and i < len(query_embeddings) else None
+            embedding = (
+                query_embeddings[i] if query_embeddings and i < len(query_embeddings) else None
+            )
             tasks.append(self.search(query, embedding, limit=limit * 2))
 
         # Execute all searches
@@ -555,9 +479,7 @@ class HybridSearchPipeline:
         elif mode == "dual":
             return await self._dual_level_search(query, query_embedding, limit)
         else:  # hybrid
-            return await self._engine.search(
-                query, query_embedding, limit=limit, expand_graph=True
-            )
+            return await self._engine.search(query, query_embedding, limit=limit, expand_graph=True)
 
     async def _dual_level_search(
         self,
@@ -603,13 +525,18 @@ class HybridSearchPipeline:
                         for chunk_data in entity_chunks:
                             # Add to results if not already present
                             if not any(r.chunk_id == chunk_data["id"] for r in results):
-                                results.append(HybridSearchResult(
-                                    chunk_id=chunk_data["id"],
-                                    document_id=chunk_data["document_id"],
-                                    text=chunk_data["text"],
-                                    score=0.5,  # Lower score for high-level results
-                                    metadata={"source": "community", "community": community["name"]},
-                                ))
+                                results.append(
+                                    HybridSearchResult(
+                                        chunk_id=chunk_data["id"],
+                                        document_id=chunk_data["document_id"],
+                                        text=chunk_data["text"],
+                                        score=0.5,  # Lower score for high-level results
+                                        metadata={
+                                            "source": "community",
+                                            "community": community["name"],
+                                        },
+                                    )
+                                )
             except Exception as e:
                 logger.error(f"High-level search failed: {e}")
 
@@ -635,13 +562,16 @@ class HybridSearchPipeline:
             return []
 
         try:
-            result = await self._kuzu.query("""
+            result = await self._kuzu.query(
+                """
                 MATCH (c:Community)
                 WHERE c.name CONTAINS $query OR c.summary CONTAINS $query
                 RETURN c.id, c.name, c.summary, c.entity_count
                 ORDER BY c.entity_count DESC
                 LIMIT $limit
-            """, {"query": query, "limit": limit})
+            """,
+                {"query": query, "limit": limit},
+            )
 
             return [
                 {
@@ -669,11 +599,14 @@ class HybridSearchPipeline:
             return []
 
         try:
-            result = await self._kuzu.query("""
+            result = await self._kuzu.query(
+                """
                 MATCH (c:Chunk)-[:MENTIONS]->(e:Entity {id: $entity_id})
                 RETURN c.id, c.document_id, c.text
                 LIMIT 5
-            """, {"entity_id": entity_id})
+            """,
+                {"entity_id": entity_id},
+            )
 
             return [
                 {

@@ -55,9 +55,7 @@ class ModelInfo:
         }
 
         for provider, keywords in provider_mapping.items():
-            if any(
-                keyword in model_lower or keyword in owned_lower for keyword in keywords
-            ):
+            if any(keyword in model_lower or keyword in owned_lower for keyword in keywords):
                 return provider
 
         return owned_by.split("/")[0] if "/" in owned_by else owned_by
@@ -66,9 +64,7 @@ class ModelInfo:
 class ModelRegistryConfig(BaseModel):
     """Model Registry configuration."""
 
-    gateway_url: str = Field(
-        default="http://localhost:8087", description="LLM Gateway base URL"
-    )
+    gateway_url: str = Field(default="http://localhost:8087", description="LLM Gateway base URL")
     cache_ttl: float = Field(default=300.0, description="Cache TTL in seconds")
     health_check_interval: float = Field(
         default=60.0, description="Health check interval in seconds"
@@ -112,9 +108,7 @@ class ModelRegistry:
             await self._client.aclose()
             self._client = None
 
-    async def fetch_models(
-        self, force_refresh: bool = False
-    ) -> Dict[str, List[ModelInfo]]:
+    async def fetch_models(self, force_refresh: bool = False) -> Dict[str, List[ModelInfo]]:
         """Fetch models from LLM Gateway API.
 
         Args:
@@ -151,9 +145,7 @@ class ModelRegistry:
                     return self.models
                 raise
 
-    def _categorize_models(
-        self, model_list: List[ModelData]
-    ) -> Dict[str, List[ModelInfo]]:
+    def _categorize_models(self, model_list: List[ModelData]) -> Dict[str, List[ModelInfo]]:
         """Categorize models by provider.
 
         Args:
@@ -263,100 +255,6 @@ class ModelRegistry:
 
         return any(model.is_healthy for model in self.models[provider])
 
-    def mark_model_healthy(self, model_id: str, provider: Optional[str] = None) -> None:
-        """Mark a model as healthy.
-
-        Args:
-            model_id: Model identifier
-            provider: Optional provider (will be inferred if None)
-        """
-        provider = provider or self._extract_provider_from_id(model_id)
-
-        if provider in self.models:
-            for model in self.models[provider]:
-                if model.id == model_id:
-                    model.is_healthy = True
-                    model.consecutive_failures = 0
-                    model.last_checked = time.time()
-                    break
-
-    def mark_model_unhealthy(
-        self, model_id: str, provider: Optional[str] = None
-    ) -> None:
-        """Mark a model as unhealthy.
-
-        Args:
-            model_id: Model identifier
-            provider: Optional provider (will be inferred if None)
-        """
-        provider = provider or self._extract_provider_from_id(model_id)
-
-        if provider in self.models:
-            for model in self.models[provider]:
-                if model.id == model_id:
-                    model.consecutive_failures += 1
-                    model.last_checked = time.time()
-
-                    if (
-                        model.consecutive_failures
-                        >= self.config.max_consecutive_failures
-                    ):
-                        model.is_healthy = False
-                        logger.warning(f"Model {model_id} marked as unhealthy")
-                    break
-
-    def _extract_provider_from_id(self, model_id: str) -> str:
-        """Extract provider from model ID.
-
-        Args:
-            model_id: Model identifier
-
-        Returns:
-            Provider name
-        """
-        model_lower = model_id.lower()
-
-        for provider in self.models:
-            if provider in model_lower:
-                return provider
-
-        return model_id.split("-")[0] if "-" in model_id else "unknown"
-
-    async def get_all_providers(self) -> List[str]:
-        """Get list of all available providers.
-
-        Returns:
-            List of provider names
-        """
-        if not self.models:
-            await self.fetch_models()
-
-        return list(self.models.keys())
-
-    async def get_rotation_list(self) -> List[ModelInfo]:
-        """Get a rotation list of healthy models across all providers.
-
-        Returns:
-            List of model info for rotation
-        """
-        if not self.models:
-            await self.fetch_models()
-
-        rotation_list: List[ModelInfo] = []
-
-        # Gather all healthy models
-        for provider in self.models:
-            for model in self.models[provider]:
-                if model.is_healthy:
-                    rotation_list.append(model)
-
-        # If no healthy models, include all models
-        if not rotation_list:
-            for provider in self.models:
-                rotation_list.extend(self.models[provider])
-
-        return rotation_list
-
     async def close(self) -> None:
         """Close the registry and cleanup resources."""
         await self._close_client()
@@ -369,9 +267,7 @@ class ModelRegistryManager:
     _lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
-    async def get_registry(
-        cls, config: Optional[ModelRegistryConfig] = None
-    ) -> ModelRegistry:
+    async def get_registry(cls, config: Optional[ModelRegistryConfig] = None) -> ModelRegistry:
         """Get or create the model registry instance.
 
         Args:

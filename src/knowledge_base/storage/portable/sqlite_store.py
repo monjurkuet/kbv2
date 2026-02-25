@@ -235,7 +235,9 @@ class SQLiteStore:
                 """)
 
                 # Create indexes
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id)")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id)"
+                )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_domain ON documents(domain)")
 
@@ -301,8 +303,12 @@ class SQLiteStore:
                     )
                 """)
 
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_mentions_chunk_id ON entity_mentions(chunk_id)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_id ON entity_mentions(entity_id)")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_mentions_chunk_id ON entity_mentions(chunk_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_id ON entity_mentions(entity_id)"
+                )
 
                 conn.commit()
 
@@ -330,12 +336,16 @@ class SQLiteStore:
         Returns:
             Document ID.
         """
+
         def _add():
             with self._get_db() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO documents (id, name, source_uri, content, mime_type, status, domain, metadata, created_at, updated_at)
                     VALUES (:id, :name, :source_uri, :content, :mime_type, :status, :domain, :metadata, :created_at, :updated_at)
-                """, document.to_db_dict())
+                """,
+                    document.to_db_dict(),
+                )
                 conn.commit()
             return document.id
 
@@ -350,6 +360,7 @@ class SQLiteStore:
         Returns:
             Document if found, None otherwise.
         """
+
         def _get():
             with self._get_db() as conn:
                 row = conn.execute(
@@ -390,6 +401,7 @@ class SQLiteStore:
         Returns:
             List of documents.
         """
+
         def _list():
             with self._get_db() as conn:
                 query = "SELECT * FROM documents WHERE 1=1"
@@ -431,13 +443,17 @@ class SQLiteStore:
             document_id: Document ID.
             status: New status.
         """
+
         def _update():
             with self._get_db() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE documents
                     SET status = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (status, document_id))
+                """,
+                    (status, document_id),
+                )
                 conn.commit()
 
         await asyncio.get_event_loop().run_in_executor(None, _update)
@@ -451,6 +467,7 @@ class SQLiteStore:
         Returns:
             True if deleted, False if not found.
         """
+
         def _delete():
             with self._get_db() as conn:
                 cursor = conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
@@ -470,12 +487,16 @@ class SQLiteStore:
         Returns:
             Chunk ID.
         """
+
         def _add():
             with self._get_db() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO chunks (id, document_id, text, chunk_index, token_count, page_number, metadata, created_at)
                     VALUES (:id, :document_id, :text, :chunk_index, :token_count, :page_number, :metadata, :created_at)
-                """, chunk.to_db_dict())
+                """,
+                    chunk.to_db_dict(),
+                )
                 conn.commit()
             return chunk.id
 
@@ -490,13 +511,17 @@ class SQLiteStore:
         Returns:
             List of chunk IDs.
         """
+
         def _add():
             with self._get_db() as conn:
                 for chunk in chunks:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT INTO chunks (id, document_id, text, chunk_index, token_count, page_number, metadata, created_at)
                         VALUES (:id, :document_id, :text, :chunk_index, :token_count, :page_number, :metadata, :created_at)
-                    """, chunk.to_db_dict())
+                    """,
+                        chunk.to_db_dict(),
+                    )
                 conn.commit()
             return [c.id for c in chunks]
 
@@ -511,13 +536,17 @@ class SQLiteStore:
         Returns:
             List of chunks.
         """
+
         def _get():
             with self._get_db() as conn:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT * FROM chunks
                     WHERE document_id = ?
                     ORDER BY chunk_index
-                """, (document_id,)).fetchall()
+                """,
+                    (document_id,),
+                ).fetchall()
                 return [
                     Chunk(
                         id=row["id"],
@@ -543,11 +572,10 @@ class SQLiteStore:
         Returns:
             Chunk if found, None otherwise.
         """
+
         def _get():
             with self._get_db() as conn:
-                row = conn.execute(
-                    "SELECT * FROM chunks WHERE id = ?", (chunk_id,)
-                ).fetchone()
+                row = conn.execute("SELECT * FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
                 if row:
                     return Chunk(
                         id=row["id"],
@@ -585,10 +613,13 @@ class SQLiteStore:
         def _add():
             with self._get_db() as conn:
                 try:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT OR REPLACE INTO chunk_vectors (chunk_id, embedding)
                         VALUES (?, ?)
-                    """, (chunk_id, embedding))
+                    """,
+                        (chunk_id, embedding),
+                    )
                     conn.commit()
                     return True
                 except sqlite3.OperationalError as e:
@@ -615,11 +646,16 @@ class SQLiteStore:
             with self._get_db() as conn:
                 for chunk_id, embedding in embeddings:
                     try:
-                        emb_list = embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
-                        conn.execute("""
+                        emb_list = (
+                            embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                        )
+                        conn.execute(
+                            """
                             INSERT OR REPLACE INTO chunk_vectors (chunk_id, embedding)
                             VALUES (?, ?)
-                        """, (chunk_id, emb_list))
+                        """,
+                            (chunk_id, emb_list),
+                        )
                         count += 1
                     except sqlite3.OperationalError as e:
                         logger.error(f"Failed to add embedding for {chunk_id}: {e}")
@@ -646,10 +682,12 @@ class SQLiteStore:
         Returns:
             List of search results with BM25 scores.
         """
+
         def _search():
             with self._get_db() as conn:
                 # Use BM25 for ranking with rowid-based join for FTS5
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT
                         c.id as chunk_id,
                         c.document_id,
@@ -663,7 +701,9 @@ class SQLiteStore:
                     WHERE chunks_fts MATCH ?
                     ORDER BY score
                     LIMIT ? OFFSET ?
-                """, (query, limit, offset)).fetchall()
+                """,
+                    (query, limit, offset),
+                ).fetchall()
 
                 # BM25 returns negative scores, so we negate for ranking
                 # Normalize to 0-1 range using sigmoid-like transformation
@@ -671,14 +711,16 @@ class SQLiteStore:
                 for row in rows:
                     raw_score = -row["score"]  # Negate since BM25 returns negative for ranking
                     normalized_score = raw_score / (raw_score + 1) if raw_score > 0 else 0
-                    results.append(SearchResult(
-                        chunk_id=row["chunk_id"],
-                        document_id=row["document_id"],
-                        text=row["text"],
-                        score=normalized_score,
-                        document_name=row["document_name"],
-                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
-                    ))
+                    results.append(
+                        SearchResult(
+                            chunk_id=row["chunk_id"],
+                            document_id=row["document_id"],
+                            text=row["text"],
+                            score=normalized_score,
+                            document_name=row["document_name"],
+                            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                        )
+                    )
                 return results
 
         try:
@@ -714,7 +756,8 @@ class SQLiteStore:
             with self._get_db() as conn:
                 try:
                     # Cosine distance search (lower is better)
-                    rows = conn.execute("""
+                    rows = conn.execute(
+                        """
                         SELECT
                             v.chunk_id,
                             c.document_id,
@@ -728,7 +771,9 @@ class SQLiteStore:
                         WHERE vec_distance_cosine(v.embedding, ?) >= ?
                         ORDER BY distance
                         LIMIT ?
-                    """, (query_embedding, query_embedding, 1 - similarity_threshold, limit)).fetchall()
+                    """,
+                        (query_embedding, query_embedding, 1 - similarity_threshold, limit),
+                    ).fetchall()
 
                     # Convert distance to similarity (1 - distance for cosine)
                     return [
@@ -756,6 +801,7 @@ class SQLiteStore:
         Returns:
             Dictionary with statistics.
         """
+
         def _get():
             with self._get_db() as conn:
                 doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -763,12 +809,16 @@ class SQLiteStore:
                 vector_count = 0
                 if self._vector_enabled:
                     try:
-                        vector_count = conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0]
-                    except:
+                        vector_count = conn.execute(
+                            "SELECT COUNT(*) FROM chunk_vectors"
+                        ).fetchone()[0]
+                    except Exception:
                         pass
 
                 # Get file size
-                db_size = self._config.db_path.stat().st_size if self._config.db_path.exists() else 0
+                db_size = (
+                    self._config.db_path.stat().st_size if self._config.db_path.exists() else 0
+                )
 
                 return {
                     "documents": doc_count,
@@ -803,13 +853,17 @@ class SQLiteStore:
         Returns:
             Document ID if found, None otherwise.
         """
+
         def _check():
             with self._get_db() as conn:
                 # Check metadata JSON for content_hash
-                row = conn.execute("""
+                row = conn.execute(
+                    """
                     SELECT id FROM documents
                     WHERE json_extract(metadata, '$.content_hash') = ?
-                """, (content_hash,)).fetchone()
+                """,
+                    (content_hash,),
+                ).fetchone()
                 return row["id"] if row else None
 
         return await asyncio.get_event_loop().run_in_executor(None, _check)

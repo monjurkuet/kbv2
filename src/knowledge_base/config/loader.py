@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 class LLMConfig(BaseModel):
     """LLM configuration."""
 
-    gateway_url: str = "http://localhost:8087/v1/"
+    gateway_url: str = "http://localhost:8087/v1"
     model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -63,6 +63,15 @@ class ServerConfig(BaseModel):
     websocket_port: int = 8765
 
 
+class CORSConfig(BaseModel):
+    """CORS configuration."""
+
+    allow_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    allow_credentials: bool = False
+    allow_methods: list[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE"])
+    allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+
+
 class Config(BaseModel):
     """Root configuration model."""
 
@@ -73,6 +82,7 @@ class Config(BaseModel):
     domain: DomainConfig = Field(default_factory=DomainConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    cors: CORSConfig = Field(default_factory=CORSConfig)
 
 
 _config: Optional[Config] = None

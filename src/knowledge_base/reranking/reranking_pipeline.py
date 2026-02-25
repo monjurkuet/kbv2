@@ -43,13 +43,9 @@ class RerankedSearchResultWithExplanation(BaseModel):
     vector_score: float = Field(default=0.0, description="Vector similarity score")
     bm25_score: float = Field(default=0.0, description="BM25 score")
     final_score: float = Field(default=0.0, description="Combined hybrid score")
-    cross_encoder_score: float = Field(
-        default=0.0, description="Cross-encoder relevance score"
-    )
+    cross_encoder_score: float = Field(default=0.0, description="Cross-encoder relevance score")
     reranked_score: float = Field(default=0.0, description="Final reranked score")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default=None, description="Document metadata"
-    )
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Document metadata")
     source: str = Field(default="hybrid", description="Result source")
     explanation: str = Field(default="", description="Explanation of ranking decision")
     rank_factors: Dict[str, float] = Field(
@@ -162,9 +158,7 @@ class RerankingPipeline:
             logger.info("No candidates found from hybrid search")
             return []
 
-        logger.info(
-            f"Retrieved {len(candidates)} candidates, reranking with cross-encoder"
-        )
+        logger.info(f"Retrieved {len(candidates)} candidates, reranking with cross-encoder")
 
         results = await self._cross_encoder.rerank(
             query=query,
@@ -337,9 +331,9 @@ class RerankingPipeline:
         if not self._cross_encoder.is_initialized:
             await self._cross_encoder.initialize()
 
-        rankings: List[List[Dict[str, Any]]] = []
-
-        for query in queries:
+        # Parallel query execution and reranking
+        async def process_query(query: str) -> List[Dict[str, Any]]:
+            """Process a single query: search + rerank."""
             candidates = await self._hybrid.search(
                 query=query,
                 vector_weight=vector_weight,
@@ -350,7 +344,7 @@ class RerankingPipeline:
             )
 
             if not candidates:
-                continue
+                return []
 
             reranked = await self._cross_encoder.rerank(
                 query=query,
@@ -358,7 +352,7 @@ class RerankingPipeline:
                 top_k=initial_top_k,
             )
 
-            ranking = [
+            return [
                 {
                     "id": r.id,
                     "text": r.text,
@@ -369,7 +363,12 @@ class RerankingPipeline:
                 for idx, r in enumerate(reranked)
             ]
 
-            rankings.append(ranking)
+        # Execute all queries in parallel
+        tasks = [process_query(query) for query in queries]
+        rankings = await asyncio.gather(*tasks)
+
+        # Filter out empty rankings
+        rankings = [r for r in rankings if r]
 
         if not rankings:
             return []
@@ -387,9 +386,7 @@ class RerankingPipeline:
 
         return {
             "cross_encoder_healthy": ce_healthy,
-            "cross_encoder_model": self._cross_encoder.model_name
-            if ce_healthy
-            else None,
+            "cross_encoder_model": self._cross_encoder.model_name if ce_healthy else None,
             "rr_fuser_config": {
                 "k": self._rr_fuser.k,
                 "max_rank": self._rr_fuser.max_rank,

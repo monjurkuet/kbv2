@@ -11,7 +11,6 @@ This module wraps ChromaDB for use in the portable storage layer.
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -31,6 +30,7 @@ def _get_chromadb():
     global _chromadb
     if _chromadb is None:
         import chromadb
+
         _chromadb = chromadb
     return _chromadb
 
@@ -81,9 +81,7 @@ class ChromaStore:
             chromadb = _get_chromadb()
 
             # Create persistent client
-            self._client = chromadb.PersistentClient(
-                path=self._config.persist_directory_str
-            )
+            self._client = chromadb.PersistentClient(path=self._config.persist_directory_str)
 
             # Get or create collection
             self._collection = self._client.get_or_create_collection(
@@ -91,7 +89,7 @@ class ChromaStore:
                 metadata={
                     "hnsw:space": self._config.distance_metric,
                     "description": "Knowledge base chunk embeddings",
-                }
+                },
             )
 
         await asyncio.get_event_loop().run_in_executor(None, _init)
@@ -118,10 +116,10 @@ class ChromaStore:
             name: Collection name.
             metadata: Collection metadata.
         """
+
         def _create():
             self._client.create_collection(
-                name=name,
-                metadata=metadata or {"hnsw:space": self._config.distance_metric}
+                name=name, metadata=metadata or {"hnsw:space": self._config.distance_metric}
             )
 
         await asyncio.get_event_loop().run_in_executor(None, _create)
@@ -132,6 +130,7 @@ class ChromaStore:
         Returns:
             List of collection names.
         """
+
         def _list():
             return [c.name for c in self._client.list_collections()]
 
@@ -143,6 +142,7 @@ class ChromaStore:
         Args:
             name: Collection name.
         """
+
         def _delete():
             self._client.delete_collection(name)
 
@@ -172,10 +172,7 @@ class ChromaStore:
             return 0
 
         # Convert numpy arrays to lists
-        embeddings = [
-            e.tolist() if isinstance(e, np.ndarray) else e
-            for e in embeddings
-        ]
+        embeddings = [e.tolist() if isinstance(e, np.ndarray) else e for e in embeddings]
 
         def _add():
             self._collection.add(
@@ -270,6 +267,7 @@ class ChromaStore:
         Returns:
             Number of embeddings deleted.
         """
+
         def _delete():
             # Get count first
             result = self._collection.get(where=where)
@@ -311,7 +309,7 @@ class ChromaStore:
                 n_results=limit,
                 where=where,
                 where_document=where_document,
-                include=["metadatas", "documents", "distances"]
+                include=["metadatas", "documents", "distances"],
             )
 
             # Convert to EmbeddingResult objects
@@ -321,15 +319,23 @@ class ChromaStore:
                     distance = results["distances"][0][i] if results["distances"] else 0
                     # Convert distance to similarity score
                     # For cosine: distance = 1 - similarity, so similarity = 1 - distance
-                    similarity = 1 - distance if self._config.distance_metric == "cosine" else 1 / (1 + distance)
+                    similarity = (
+                        1 - distance
+                        if self._config.distance_metric == "cosine"
+                        else 1 / (1 + distance)
+                    )
 
-                    embedding_results.append(EmbeddingResult(
-                        chunk_id=id_,
-                        document_id=results["metadatas"][0][i].get("document_id") if results["metadatas"] else None,
-                        text=results["documents"][0][i] if results["documents"] else None,
-                        score=similarity,
-                        metadata=results["metadatas"][0][i] if results["metadatas"] else {},
-                    ))
+                    embedding_results.append(
+                        EmbeddingResult(
+                            chunk_id=id_,
+                            document_id=results["metadatas"][0][i].get("document_id")
+                            if results["metadatas"]
+                            else None,
+                            text=results["documents"][0][i] if results["documents"] else None,
+                            score=similarity,
+                            metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                        )
+                    )
 
             return embedding_results
 
@@ -375,10 +381,10 @@ class ChromaStore:
         Returns:
             Dictionary with id, embedding, metadata, document if found.
         """
+
         def _get():
             result = self._collection.get(
-                ids=[id],
-                include=["embeddings", "metadatas", "documents"]
+                ids=[id], include=["embeddings", "metadatas", "documents"]
             )
 
             if result["ids"]:
@@ -408,22 +414,22 @@ class ChromaStore:
         Returns:
             List of embedding dictionaries.
         """
+
         def _get():
             result = self._collection.get(
-                ids=ids,
-                where=where,
-                limit=limit,
-                include=["embeddings", "metadatas", "documents"]
+                ids=ids, where=where, limit=limit, include=["embeddings", "metadatas", "documents"]
             )
 
             results = []
             for i, id_ in enumerate(result["ids"]):
-                results.append({
-                    "id": id_,
-                    "embedding": result["embeddings"][i] if result["embeddings"] else None,
-                    "metadata": result["metadatas"][i] if result["metadatas"] else {},
-                    "document": result["documents"][i] if result["documents"] else None,
-                })
+                results.append(
+                    {
+                        "id": id_,
+                        "embedding": result["embeddings"][i] if result["embeddings"] else None,
+                        "metadata": result["metadatas"][i] if result["metadatas"] else {},
+                        "document": result["documents"][i] if result["documents"] else None,
+                    }
+                )
 
             return results
 
@@ -440,6 +446,7 @@ class ChromaStore:
         Returns:
             Number of embeddings.
         """
+
         def _count():
             # ChromaDB's count() doesn't accept 'where' in newer versions
             return self._collection.count()

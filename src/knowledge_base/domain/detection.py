@@ -34,9 +34,16 @@ class DomainDetector:
         self.ontology = ontology_snippets or DOMAIN_ONTOLOGIES
         self.config = config or DomainConfig()
 
-    async def detect_domain(
-        self, document_text: str, top_k: int = 3
-    ) -> DomainDetectionResult:
+        # Pre-compile regex patterns for all keywords in all ontologies
+        # This improves performance by avoiding repeated regex compilation
+        self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
+        for domain, ontology in self.ontology.items():
+            keywords = ontology.get("keywords", [])
+            self._compiled_patterns[domain] = [
+                re.compile(r"\b" + re.escape(keyword.lower()) + r"\b") for keyword in keywords
+            ]
+
+    async def detect_domain(self, document_text: str, top_k: int = 3) -> DomainDetectionResult:
         """Detect domain(s) of a document.
 
         Args:
@@ -75,9 +82,7 @@ class DomainDetector:
                 candidates = list(self.ontology.keys())[:3]
             llm_predictions = await self._llm_analysis(document_text, candidates)
 
-        all_predictions = self._calibrate_confidence(
-            keyword_predictions, llm_predictions
-        )
+        all_predictions = self._calibrate_confidence(keyword_predictions, llm_predictions)
 
         if not all_predictions:
             all_predictions = [
@@ -100,18 +105,12 @@ class DomainDetector:
             is_multi_domain=is_multi,
             detection_method="hybrid"
             if keyword_predictions and llm_predictions
-            else (
-                "keyword"
-                if keyword_predictions
-                else ("llm" if llm_predictions else "fallback")
-            ),
+            else ("keyword" if keyword_predictions else ("llm" if llm_predictions else "fallback")),
             processing_time_ms=(time.time() - start_time) * 1000,
             confidence_threshold=self.config.min_confidence,
         )
 
-    async def _keyword_screening(
-        self, text: str, max_domains: int = 5
-    ) -> List[DomainPrediction]:
+    async def _keyword_screening(self, text: str, max_domains: int = 5) -> List[DomainPrediction]:
         """Perform keyword-based screening to identify potential domains.
 
         Args:
@@ -125,14 +124,13 @@ class DomainDetector:
         domain_scores: Dict[str, float] = {}
         domain_evidence: Dict[str, List[str]] = {}
 
-        for domain, ontology in self.ontology.items():
+        for domain, patterns in self._compiled_patterns.items():
             score = 0.0
             evidence = []
-            keywords = ontology.get("keywords", [])
+            keywords = self.ontology.get(domain, {}).get("keywords", [])
 
-            for keyword in keywords:
-                pattern = r"\b" + re.escape(keyword.lower()) + r"\b"
-                matches = list(re.finditer(pattern, text_lower))
+            for keyword, pattern in zip(keywords, patterns):
+                matches = list(pattern.finditer(text_lower))
                 count = len(matches)
 
                 if count > 0:
@@ -152,9 +150,7 @@ class DomainDetector:
             domain_scores = {k: v / max_score for k, v in domain_scores.items()}
 
         predictions = []
-        for domain, score in sorted(domain_scores.items(), key=lambda x: -x[1])[
-            :max_domains
-        ]:
+        for domain, score in sorted(domain_scores.items(), key=lambda x: -x[1])[:max_domains]:
             predictions.append(
                 DomainPrediction(
                     domain=domain,
@@ -167,9 +163,7 @@ class DomainDetector:
 
         return predictions
 
-    async def _llm_analysis(
-        self, text: str, candidates: List[str]
-    ) -> List[DomainPrediction]:
+    async def _llm_analysis(self, text: str, candidates: List[str]) -> List[DomainPrediction]:
         """Perform LLM-based analysis of document domain.
 
         Args:
@@ -182,9 +176,7 @@ class DomainDetector:
         if not self.llm:
             return []
 
-        available_candidates = [
-            domain for domain in candidates if domain in self.ontology
-        ]
+        available_candidates = [domain for domain in candidates if domain in self.ontology]
         if not available_candidates:
             available_candidates = list(self.ontology.keys())[:3]
 
@@ -256,9 +248,7 @@ Respond with JSON with keys: domain (string), confidence (0.0-1.0), reasoning (s
 
         return sorted(combined.values(), key=lambda x: -x.confidence)
 
-    def _keyword_screening_sync(
-        self, text: str, max_domains: int = 5
-    ) -> List[DomainPrediction]:
+    def _keyword_screening_sync(self, text: str, max_domains: int = 5) -> List[DomainPrediction]:
         """Synchronous wrapper for keyword screening (for testing purposes).
 
         Args:

@@ -32,6 +32,7 @@ def _get_kuzu():
     global _kuzu
     if _kuzu is None:
         import kuzu
+
         _kuzu = kuzu
     return _kuzu
 
@@ -153,7 +154,7 @@ class KuzuGraphStore:
                 text STRING,
                 chunk_index INT64,
                 token_count INT64,
-                created_at TIMESTAMP
+                created_at STRING
             )
         """)
 
@@ -168,7 +169,7 @@ class KuzuGraphStore:
                 confidence DOUBLE,
                 source_text STRING,
                 properties STRING,
-                created_at TIMESTAMP
+                created_at STRING
             )
         """)
 
@@ -245,8 +246,10 @@ class KuzuGraphStore:
         Returns:
             Entity ID.
         """
+
         def _add():
-            self._conn.execute("""
+            self._conn.execute(
+                """
                 CREATE (e:Entity {
                     id: $id,
                     name: $name,
@@ -258,46 +261,8 @@ class KuzuGraphStore:
                     properties: $properties,
                     created_at: $created_at
                 })
-            """, {
-                "id": entity.id,
-                "name": entity.name,
-                "type": entity.entity_type,
-                "description": entity.description or "",
-                "domain": entity.domain or "",
-                "confidence": entity.confidence,
-                "source_text": entity.source_text or "",
-                "properties": json.dumps(entity.properties),
-                "created_at": entity.created_at.isoformat(),
-            })
-            return entity.id
-
-        return await asyncio.get_event_loop().run_in_executor(None, _add)
-
-    async def add_entities_batch(self, entities: list[Entity]) -> list[str]:
-        """Add multiple entities in a batch.
-
-        Args:
-            entities: List of entities to add.
-
-        Returns:
-            List of entity IDs.
-        """
-        def _add():
-            entity_ids = []
-            for entity in entities:
-                self._conn.execute("""
-                    CREATE (e:Entity {
-                        id: $id,
-                        name: $name,
-                        type: $type,
-                        description: $description,
-                        domain: $domain,
-                        confidence: $confidence,
-                        source_text: $source_text,
-                        properties: $properties,
-                        created_at: $created_at
-                    })
-                """, {
+            """,
+                {
                     "id": entity.id,
                     "name": entity.name,
                     "type": entity.entity_type,
@@ -307,9 +272,60 @@ class KuzuGraphStore:
                     "source_text": entity.source_text or "",
                     "properties": json.dumps(entity.properties),
                     "created_at": entity.created_at.isoformat(),
+                },
+            )
+            return entity.id
+
+        return await asyncio.get_event_loop().run_in_executor(None, _add)
+
+    async def add_entities_batch(self, entities: list[Entity]) -> list[str]:
+        """Add multiple entities in a batch using UNWIND.
+
+        Args:
+            entities: List of entities to add.
+
+        Returns:
+            List of entity IDs.
+        """
+        if not entities:
+            return []
+
+        def _add():
+            # Prepare entity data for UNWIND
+            entity_data = [
+                {
+                    "id": e.id,
+                    "name": e.name,
+                    "type": e.entity_type,
+                    "description": e.description or "",
+                    "domain": e.domain or "",
+                    "confidence": e.confidence,
+                    "source_text": e.source_text or "",
+                    "properties": json.dumps(e.properties),
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in entities
+            ]
+
+            self._conn.execute(
+                """
+                UNWIND $entities AS entity
+                CREATE (e:Entity {
+                    id: entity.id,
+                    name: entity.name,
+                    type: entity.type,
+                    description: entity.description,
+                    domain: entity.domain,
+                    confidence: entity.confidence,
+                    source_text: entity.source_text,
+                    properties: entity.properties,
+                    created_at: entity.created_at
                 })
-                entity_ids.append(entity.id)
-            return entity_ids
+            """,
+                {"entities": entity_data},
+            )
+
+            return [e.id for e in entities]
 
         return await asyncio.get_event_loop().run_in_executor(None, _add)
 
@@ -322,12 +338,16 @@ class KuzuGraphStore:
         Returns:
             Entity if found, None otherwise.
         """
+
         def _get():
-            result = self._conn.execute("""
+            result = self._conn.execute(
+                """
                 MATCH (e:Entity {id: $id})
                 RETURN e.id, e.name, e.type, e.description, e.domain,
                        e.confidence, e.source_text, e.properties, e.created_at
-            """, {"id": entity_id})
+            """,
+                {"id": entity_id},
+            )
 
             if result.has_next():
                 row = result.get_next()
@@ -364,6 +384,7 @@ class KuzuGraphStore:
         Returns:
             List of matching entities.
         """
+
         def _search():
             query = "MATCH (e:Entity) WHERE 1=1"
             params: dict[str, Any] = {}
@@ -385,17 +406,19 @@ class KuzuGraphStore:
 
             while result.has_next():
                 row = result.get_next()
-                entities.append(Entity(
-                    id=row[0],
-                    name=row[1],
-                    entity_type=row[2],
-                    description=row[3] if row[3] else None,
-                    domain=row[4] if row[4] else None,
-                    confidence=row[5],
-                    source_text=row[6] if row[6] else None,
-                    properties=json.loads(row[7]) if row[7] else {},
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
-                ))
+                entities.append(
+                    Entity(
+                        id=row[0],
+                        name=row[1],
+                        entity_type=row[2],
+                        description=row[3] if row[3] else None,
+                        domain=row[4] if row[4] else None,
+                        confidence=row[5],
+                        source_text=row[6] if row[6] else None,
+                        properties=json.loads(row[7]) if row[7] else {},
+                        created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
+                    )
+                )
 
             return entities
 
@@ -410,12 +433,16 @@ class KuzuGraphStore:
         Returns:
             True if deleted, False if not found.
         """
+
         def _delete():
-            result = self._conn.execute("""
+            result = self._conn.execute(
+                """
                 MATCH (e:Entity {id: $id})
                 DELETE e
                 RETURN count(e)
-            """, {"id": entity_id})
+            """,
+                {"id": entity_id},
+            )
 
             return result.has_next() and result.get_next()[0] > 0
 
@@ -432,10 +459,12 @@ class KuzuGraphStore:
         Returns:
             Edge ID (stored in properties).
         """
+
         def _add():
             properties = {**edge.properties, "_edge_id": edge.id}
 
-            self._conn.execute("""
+            self._conn.execute(
+                """
                 MATCH (source:Entity {id: $source_id})
                 MATCH (target:Entity {id: $target_id})
                 CREATE (source)-[r:RELATES_TO {
@@ -444,20 +473,22 @@ class KuzuGraphStore:
                     source_text: $source_text,
                     properties: $properties
                 }]->(target)
-            """, {
-                "source_id": edge.source_id,
-                "target_id": edge.target_id,
-                "relation_type": edge.relation_type,
-                "confidence": edge.confidence,
-                "source_text": edge.source_text or "",
-                "properties": json.dumps(properties),
-            })
+            """,
+                {
+                    "source_id": edge.source_id,
+                    "target_id": edge.target_id,
+                    "relation_type": edge.relation_type,
+                    "confidence": edge.confidence,
+                    "source_text": edge.source_text or "",
+                    "properties": json.dumps(properties),
+                },
+            )
             return edge.id
 
         return await asyncio.get_event_loop().run_in_executor(None, _add)
 
     async def add_edge_batch(self, edges: list[Edge]) -> list[str]:
-        """Add multiple edges in a batch.
+        """Add multiple edges in a batch using UNWIND.
 
         Args:
             edges: List of edges to add.
@@ -465,29 +496,40 @@ class KuzuGraphStore:
         Returns:
             List of edge IDs.
         """
+        if not edges:
+            return []
+
         def _add():
-            edge_ids = []
-            for edge in edges:
-                properties = {**edge.properties, "_edge_id": edge.id}
-                self._conn.execute("""
-                    MATCH (source:Entity {id: $source_id})
-                    MATCH (target:Entity {id: $target_id})
-                    CREATE (source)-[r:RELATES_TO {
-                        relation_type: $relation_type,
-                        confidence: $confidence,
-                        source_text: $source_text,
-                        properties: $properties
-                    }]->(target)
-                """, {
-                    "source_id": edge.source_id,
-                    "target_id": edge.target_id,
-                    "relation_type": edge.relation_type,
-                    "confidence": edge.confidence,
-                    "source_text": edge.source_text or "",
-                    "properties": json.dumps(properties),
-                })
-                edge_ids.append(edge.id)
-            return edge_ids
+            # Prepare edge data for UNWIND
+            edge_data = [
+                {
+                    "id": e.id,
+                    "source_id": e.source_id,
+                    "target_id": e.target_id,
+                    "relation_type": e.relation_type,
+                    "confidence": e.confidence,
+                    "source_text": e.source_text or "",
+                    "properties": json.dumps({**e.properties, "_edge_id": e.id}),
+                }
+                for e in edges
+            ]
+
+            self._conn.execute(
+                """
+                UNWIND $edges AS edge
+                MATCH (source:Entity {id: edge.source_id})
+                MATCH (target:Entity {id: edge.target_id})
+                CREATE (source)-[r:RELATES_TO {
+                    relation_type: edge.relation_type,
+                    confidence: edge.confidence,
+                    source_text: edge.source_text,
+                    properties: edge.properties
+                }]->(target)
+            """,
+                {"edges": edge_data},
+            )
+
+            return [e.id for e in edges]
 
         return await asyncio.get_event_loop().run_in_executor(None, _add)
 
@@ -509,6 +551,7 @@ class KuzuGraphStore:
         Returns:
             List of relationships with connected entities.
         """
+
         def _get():
             relationships = []
 
@@ -524,23 +567,28 @@ class KuzuGraphStore:
                     LIMIT $limit
                 """
 
-                result = self._conn.execute(query, {
-                    "id": entity_id,
-                    "relation_type": relation_type,
-                    "limit": limit,
-                })
+                result = self._conn.execute(
+                    query,
+                    {
+                        "id": entity_id,
+                        "relation_type": relation_type,
+                        "limit": limit,
+                    },
+                )
 
                 while result.has_next():
                     row = result.get_next()
-                    relationships.append({
-                        "source_id": row[0],
-                        "target_id": row[1],
-                        "target_name": row[2],
-                        "relation_type": row[3],
-                        "confidence": row[4],
-                        "source_text": row[5],
-                        "direction": row[6],
-                    })
+                    relationships.append(
+                        {
+                            "source_id": row[0],
+                            "target_id": row[1],
+                            "target_name": row[2],
+                            "relation_type": row[3],
+                            "confidence": row[4],
+                            "source_text": row[5],
+                            "direction": row[6],
+                        }
+                    )
 
             if direction in ["incoming", "both"]:
                 query = """
@@ -554,23 +602,28 @@ class KuzuGraphStore:
                     LIMIT $limit
                 """
 
-                result = self._conn.execute(query, {
-                    "id": entity_id,
-                    "relation_type": relation_type,
-                    "limit": limit,
-                })
+                result = self._conn.execute(
+                    query,
+                    {
+                        "id": entity_id,
+                        "relation_type": relation_type,
+                        "limit": limit,
+                    },
+                )
 
                 while result.has_next():
                     row = result.get_next()
-                    relationships.append({
-                        "source_id": row[0],
-                        "source_name": row[1],
-                        "target_id": row[2],
-                        "relation_type": row[3],
-                        "confidence": row[4],
-                        "source_text": row[5],
-                        "direction": row[6],
-                    })
+                    relationships.append(
+                        {
+                            "source_id": row[0],
+                            "source_name": row[1],
+                            "target_id": row[2],
+                            "relation_type": row[3],
+                            "confidence": row[4],
+                            "source_text": row[5],
+                            "direction": row[6],
+                        }
+                    )
 
             return relationships[:limit]
 
@@ -593,17 +646,21 @@ class KuzuGraphStore:
             confidence: Confidence score.
             quote: Grounding quote.
         """
+
         def _add():
-            self._conn.execute("""
+            self._conn.execute(
+                """
                 MATCH (c:Chunk {id: $chunk_id})
                 MATCH (e:Entity {id: $entity_id})
                 CREATE (c)-[r:MENTIONS {confidence: $confidence, quote: $quote}]->(e)
-            """, {
-                "chunk_id": chunk_id,
-                "entity_id": entity_id,
-                "confidence": confidence,
-                "quote": quote or "",
-            })
+            """,
+                {
+                    "chunk_id": chunk_id,
+                    "entity_id": entity_id,
+                    "confidence": confidence,
+                    "quote": quote or "",
+                },
+            )
 
         await asyncio.get_event_loop().run_in_executor(None, _add)
 
@@ -616,27 +673,33 @@ class KuzuGraphStore:
         Returns:
             List of entities mentioned in the chunk.
         """
+
         def _get():
-            result = self._conn.execute("""
+            result = self._conn.execute(
+                """
                 MATCH (c:Chunk {id: $chunk_id})-[:MENTIONS]->(e:Entity)
                 RETURN e.id, e.name, e.type, e.description, e.domain,
                        e.confidence, e.source_text, e.properties, e.created_at
-            """, {"chunk_id": chunk_id})
+            """,
+                {"chunk_id": chunk_id},
+            )
 
             entities = []
             while result.has_next():
                 row = result.get_next()
-                entities.append(Entity(
-                    id=row[0],
-                    name=row[1],
-                    entity_type=row[2],
-                    description=row[3] if row[3] else None,
-                    domain=row[4] if row[4] else None,
-                    confidence=row[5],
-                    source_text=row[6] if row[6] else None,
-                    properties=json.loads(row[7]) if row[7] else {},
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
-                ))
+                entities.append(
+                    Entity(
+                        id=row[0],
+                        name=row[1],
+                        entity_type=row[2],
+                        description=row[3] if row[3] else None,
+                        domain=row[4] if row[4] else None,
+                        confidence=row[5],
+                        source_text=row[6] if row[6] else None,
+                        properties=json.loads(row[7]) if row[7] else {},
+                        created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
+                    )
+                )
 
             return entities
 
@@ -653,8 +716,10 @@ class KuzuGraphStore:
         Returns:
             Community ID.
         """
+
         def _add():
-            self._conn.execute("""
+            self._conn.execute(
+                """
                 CREATE (c:Community {
                     id: $id,
                     name: $name,
@@ -663,14 +728,16 @@ class KuzuGraphStore:
                     entity_count: $entity_count,
                     parent_id: $parent_id
                 })
-            """, {
-                "id": community.id,
-                "name": community.name,
-                "level": community.level,
-                "summary": community.summary or "",
-                "entity_count": community.entity_count,
-                "parent_id": community.parent_id or "",
-            })
+            """,
+                {
+                    "id": community.id,
+                    "name": community.name,
+                    "level": community.level,
+                    "summary": community.summary or "",
+                    "entity_count": community.entity_count,
+                    "parent_id": community.parent_id or "",
+                },
+            )
             return community.id
 
         return await asyncio.get_event_loop().run_in_executor(None, _add)
@@ -682,12 +749,16 @@ class KuzuGraphStore:
             entity_id: Entity ID.
             community_id: Community ID.
         """
+
         def _assign():
-            self._conn.execute("""
+            self._conn.execute(
+                """
                 MATCH (e:Entity {id: $entity_id})
                 MATCH (c:Community {id: $community_id})
                 CREATE (e)-[:MEMBER_OF]->(c)
-            """, {"entity_id": entity_id, "community_id": community_id})
+            """,
+                {"entity_id": entity_id, "community_id": community_id},
+            )
 
         await asyncio.get_event_loop().run_in_executor(None, _assign)
 
@@ -700,27 +771,33 @@ class KuzuGraphStore:
         Returns:
             List of entities in the community.
         """
+
         def _get():
-            result = self._conn.execute("""
+            result = self._conn.execute(
+                """
                 MATCH (e:Entity)-[:MEMBER_OF]->(c:Community {id: $community_id})
                 RETURN e.id, e.name, e.type, e.description, e.domain,
                        e.confidence, e.source_text, e.properties, e.created_at
-            """, {"community_id": community_id})
+            """,
+                {"community_id": community_id},
+            )
 
             entities = []
             while result.has_next():
                 row = result.get_next()
-                entities.append(Entity(
-                    id=row[0],
-                    name=row[1],
-                    entity_type=row[2],
-                    description=row[3] if row[3] else None,
-                    domain=row[4] if row[4] else None,
-                    confidence=row[5],
-                    source_text=row[6] if row[6] else None,
-                    properties=json.loads(row[7]) if row[7] else {},
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
-                ))
+                entities.append(
+                    Entity(
+                        id=row[0],
+                        name=row[1],
+                        entity_type=row[2],
+                        description=row[3] if row[3] else None,
+                        domain=row[4] if row[4] else None,
+                        confidence=row[5],
+                        source_text=row[6] if row[6] else None,
+                        properties=json.loads(row[7]) if row[7] else {},
+                        created_at=datetime.fromisoformat(row[8]) if row[8] else datetime.utcnow(),
+                    )
+                )
 
             return entities
 
@@ -746,6 +823,7 @@ class KuzuGraphStore:
         Returns:
             Dictionary with nodes and edges.
         """
+
         def _traverse():
             # Get starting entity
             nodes = []
@@ -764,18 +842,23 @@ class KuzuGraphStore:
                 visited.add(current_id)
 
                 # Get entity
-                entity = self._conn.execute("""
+                entity = self._conn.execute(
+                    """
                     MATCH (e:Entity {id: $id})
                     RETURN e.id, e.name, e.type
-                """, {"id": current_id})
+                """,
+                    {"id": current_id},
+                )
 
                 if entity.has_next():
                     row = entity.get_next()
-                    nodes.append({
-                        "id": row[0],
-                        "name": row[1],
-                        "type": row[2],
-                    })
+                    nodes.append(
+                        {
+                            "id": row[0],
+                            "name": row[1],
+                            "type": row[2],
+                        }
+                    )
 
                 if depth < max_depth:
                     # Get connected entities
@@ -783,24 +866,29 @@ class KuzuGraphStore:
                     if relation_types:
                         rel_filter = f" AND r.relation_type IN {relation_types}"
 
-                    result = self._conn.execute(f"""
+                    result = self._conn.execute(
+                        f"""
                         MATCH (e:Entity {{id: $id}})-[r:RELATES_TO]-(connected:Entity)
                         WHERE 1=1 {rel_filter}
                         RETURN connected.id, connected.name, connected.type,
                                r.relation_type, r.confidence,
                                CASE WHEN startNode(r) = e THEN 'outgoing' ELSE 'incoming' END as direction
-                    """, {"id": current_id})
+                    """,
+                        {"id": current_id},
+                    )
 
                     while result.has_next():
                         row = result.get_next()
                         connected_id = row[0]
 
-                        edges.append({
-                            "source": current_id if row[5] == "outgoing" else connected_id,
-                            "target": connected_id if row[5] == "outgoing" else current_id,
-                            "relation_type": row[3],
-                            "confidence": row[4],
-                        })
+                        edges.append(
+                            {
+                                "source": current_id if row[5] == "outgoing" else connected_id,
+                                "target": connected_id if row[5] == "outgoing" else current_id,
+                                "relation_type": row[3],
+                                "confidence": row[4],
+                            }
+                        )
 
                         if connected_id not in visited:
                             queue.append((connected_id, depth + 1))
@@ -811,7 +899,9 @@ class KuzuGraphStore:
 
     # ==================== Raw Query ====================
 
-    async def query(self, cypher_query: str, params: Optional[dict[str, Any]] = None) -> GraphQueryResult:
+    async def query(
+        self, cypher_query: str, params: Optional[dict[str, Any]] = None
+    ) -> GraphQueryResult:
         """Execute a raw Cypher query.
 
         Args:
@@ -855,13 +945,25 @@ class KuzuGraphStore:
         Returns:
             Dictionary with statistics.
         """
+
         def _get():
-            entity_count = self._conn.execute("MATCH (e:Entity) RETURN count(e)").get_next()[0]
-            chunk_count = self._conn.execute("MATCH (c:Chunk) RETURN count(c)").get_next()[0]
-            document_count = self._conn.execute("MATCH (d:Document) RETURN count(d)").get_next()[0]
-            community_count = self._conn.execute("MATCH (c:Community) RETURN count(c)").get_next()[0]
-            rel_count = self._conn.execute("MATCH ()-[r:RELATES_TO]->() RETURN count(r)").get_next()[0]
-            mention_count = self._conn.execute("MATCH ()-[r:MENTIONS]->() RETURN count(r)").get_next()[0]
+            # Combine all count queries into a single query for efficiency
+            result = self._conn.execute("""
+                RETURN 
+                    size([(e:Entity) | e]) as entity_count,
+                    size([(c:Chunk) | c]) as chunk_count,
+                    size([(d:Document) | d]) as document_count,
+                    size([(c:Community) | c]) as community_count,
+                    size([()-[r:RELATES_TO]->() | r]) as rel_count,
+                    size([()-[r:MENTIONS]->() | r]) as mention_count
+            """).get_next()
+
+            entity_count = result[0]
+            chunk_count = result[1]
+            document_count = result[2]
+            community_count = result[3]
+            rel_count = result[4]
+            mention_count = result[5]
 
             # Get directory size
             dir_size = 0

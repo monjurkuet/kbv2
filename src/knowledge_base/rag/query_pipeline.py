@@ -128,6 +128,7 @@ class RAGQueryPipeline:
             QueryResult with answer and metadata.
         """
         import time
+
         start_time = time.time()
 
         mode = mode or self._default_mode
@@ -141,11 +142,17 @@ class RAGQueryPipeline:
         elif mode == RAGMode.HYBRID:
             chunks = await self._hybrid_retrieval(question, query_embedding, filters, max_chunks)
         elif mode == RAGMode.DUAL_LEVEL:
-            chunks = await self._dual_level_retrieval(question, query_embedding, filters, max_chunks)
+            chunks = await self._dual_level_retrieval(
+                question, query_embedding, filters, max_chunks
+            )
         elif mode == RAGMode.GRAPH_ENHANCED:
-            chunks = await self._graph_enhanced_retrieval(question, query_embedding, filters, max_chunks)
+            chunks = await self._graph_enhanced_retrieval(
+                question, query_embedding, filters, max_chunks
+            )
         elif mode == RAGMode.CORRECTIVE:
-            chunks = await self._corrective_retrieval(question, query_embedding, filters, max_chunks)
+            chunks = await self._corrective_retrieval(
+                question, query_embedding, filters, max_chunks
+            )
         else:
             chunks = await self._hybrid_retrieval(question, query_embedding, filters, max_chunks)
 
@@ -317,9 +324,9 @@ class RAGQueryPipeline:
         # Get unique entity IDs
         entity_ids = list(set(e.get("id") for e in all_entities if e.get("id")))
 
-        # Traverse graph from entities
-        expanded_chunks = []
-        for entity_id in entity_ids[:5]:  # Limit expansions
+        # Traverse graph from entities (parallel execution)
+        async def traverse_entity(entity_id: str) -> list[HybridSearchResult]:
+            """Traverse graph from a single entity."""
             try:
                 traversal = await self._kuzu.traverse(
                     start_entity_id=entity_id,
@@ -328,23 +335,40 @@ class RAGQueryPipeline:
                 )
 
                 # Get chunks mentioning connected entities
+                expanded = []
                 for node in traversal.get("nodes", []):
-                    node_chunks = await self._kuzu.query("""
+                    node_chunks = await self._kuzu.query(
+                        """
                         MATCH (c:Chunk)-[:MENTIONS]->(e:Entity {id: $entity_id})
                         RETURN c.id, c.document_id, c.text
                         LIMIT 3
-                    """, {"entity_id": node.get("id")})
+                    """,
+                        {"entity_id": node.get("id")},
+                    )
 
                     for record in node_chunks.records:
-                        expanded_chunks.append(HybridSearchResult(
-                            chunk_id=record.get("c.id"),
-                            document_id=record.get("c.document_id"),
-                            text=record.get("c.text"),
-                            score=0.5,  # Lower score for graph-expanded results
-                            metadata={"source": "graph_traversal"},
-                        ))
+                        expanded.append(
+                            HybridSearchResult(
+                                chunk_id=record.get("c.id"),
+                                document_id=record.get("c.document_id"),
+                                text=record.get("c.text"),
+                                score=0.5,  # Lower score for graph-expanded results
+                                metadata={"source": "graph_traversal"},
+                            )
+                        )
+                return expanded
             except Exception as e:
                 logger.debug(f"Graph traversal failed for {entity_id}: {e}")
+                return []
+
+        # Execute all traversals in parallel
+        traversal_tasks = [traverse_entity(eid) for eid in entity_ids[:5]]
+        traversal_results = await asyncio.gather(*traversal_tasks)
+
+        # Flatten results
+        expanded_chunks = []
+        for result_list in traversal_results:
+            expanded_chunks.extend(result_list)
 
         # Combine and deduplicate
         all_chunks = initial_results + expanded_chunks
@@ -463,6 +487,7 @@ class RAGQueryPipeline:
             QueryResult with reasoning included.
         """
         import time
+
         start_time = time.time()
 
         mode = mode or self._default_mode

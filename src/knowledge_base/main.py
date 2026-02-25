@@ -5,6 +5,14 @@ This module provides:
 - FastAPI application for REST API
 - CLI commands for document ingestion and querying
 - Lifespan management for storage components
+
+Routes have been modularized into:
+- routes/health.py - Health and stats endpoints
+- routes/documents.py - Document CRUD endpoints
+- routes/search.py - Search and reranked search endpoints
+- routes/ingestion.py - Document ingestion endpoint
+- routes/domain.py - Domain detection endpoint
+- routes/graph.py - Knowledge graph endpoints
 """
 
 import logging
@@ -13,12 +21,21 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 load_dotenv()
 
+from knowledge_base.config.loader import load_config
+from knowledge_base.routes.dependencies import set_dependencies, RouteDeps
+from knowledge_base.routes import (
+    health_router,
+    documents_router,
+    search_router,
+    ingestion_router,
+    domain_router,
+    graph_router,
+)
 from knowledge_base.storage.portable import (
     SQLiteStore,
     ChromaStore,
@@ -26,18 +43,18 @@ from knowledge_base.storage.portable import (
     HybridSearchEngine,
     PortableStorageConfig,
 )
-from knowledge_base.storage.portable.sqlite_store import Document, Chunk
-from knowledge_base.ingestion import (
-    VisionModelClient,
-    DocumentProcessor,
-    SemanticChunker,
-)
+from knowledge_base.ingestion import VisionModelClient, DocumentProcessor
 from knowledge_base.extraction import ExtractionPipeline
+from knowledge_base.clients.embedding import EmbeddingClient
+from knowledge_base.domain.detection import DomainDetector
+from knowledge_base.domain.domain_models import DomainConfig
+from knowledge_base.summaries.community_summaries import CommunitySummarizer
+from knowledge_base.reranking.reranking_pipeline import RerankingPipeline
+from knowledge_base.reranking.cross_encoder import CrossEncoderReranker
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -50,6 +67,11 @@ _search_engine: Optional[HybridSearchEngine] = None
 _vision_client: Optional[VisionModelClient] = None
 _doc_processor: Optional[DocumentProcessor] = None
 _extraction_pipeline: Optional[ExtractionPipeline] = None
+_embedding_client: Optional[EmbeddingClient] = None
+_domain_detector: Optional[DomainDetector] = None
+_community_summarizer: Optional[CommunitySummarizer] = None
+_reranking_pipeline: Optional[RerankingPipeline] = None
+_cross_encoder: Optional[CrossEncoderReranker] = None
 
 
 @asynccontextmanager
@@ -57,6 +79,8 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
     global _storage_config, _sqlite_store, _chroma_store, _kuzu_store
     global _search_engine, _vision_client, _doc_processor, _extraction_pipeline
+    global _embedding_client, _domain_detector, _community_summarizer
+    global _reranking_pipeline, _cross_encoder
 
     # Startup
     logger.info("Starting Portable Knowledge Base...")
@@ -88,6 +112,14 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Hybrid search engine initialized")
 
+        # Initialize embedding client
+        try:
+            _embedding_client = EmbeddingClient()
+            await _embedding_client.initialize()
+            logger.info(f"Embedding client initialized (model: {_embedding_client._model})")
+        except Exception as e:
+            logger.warning(f"Embedding client initialization failed: {e}")
+
         # Initialize vision client (optional)
         try:
             _vision_client = VisionModelClient()
@@ -99,12 +131,61 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Vision model API healthy: {health.get('available_models', [])}")
                 _doc_processor = DocumentProcessor(vision_client=_vision_client)
                 _extraction_pipeline = ExtractionPipeline(_vision_client)
+
+                # Initialize domain detector with LLM client
+                _domain_detector = DomainDetector(
+                    llm_client=_vision_client,
+                    config=DomainConfig(
+                        enable_keyword_screening=True,
+                        enable_llm_analysis=True,
+                        min_confidence=0.3,
+                    ),
+                )
+                logger.info("Domain detector initialized")
+
+                # Initialize community summarizer
+                _community_summarizer = CommunitySummarizer(llm_client=_vision_client)
+                logger.info("Community summarizer initialized")
             else:
                 logger.warning(f"Vision model API not available: {health}")
         except Exception as e:
             logger.warning(f"Vision model initialization failed: {e}")
 
-        logger.info("Portable Knowledge Base started successfully")
+        # Initialize cross-encoder for reranking
+        try:
+            _cross_encoder = CrossEncoderReranker()
+            await _cross_encoder.initialize()
+            logger.info(f"Cross-encoder initialized: {_cross_encoder.model_name}")
+
+            # Initialize reranking pipeline
+            _reranking_pipeline = RerankingPipeline(
+                hybrid_search=_search_engine,
+                cross_encoder=_cross_encoder,
+            )
+            logger.info("Reranking pipeline initialized")
+        except Exception as e:
+            logger.warning(f"Cross-encoder/reranking initialization failed: {e}")
+
+            logger.info("Portable Knowledge Base started successfully")
+
+            # Initialize route dependencies
+            set_dependencies(
+                RouteDeps(
+                    sqlite_store=_sqlite_store,
+                    chroma_store=_chroma_store,
+                    kuzu_store=_kuzu_store,
+                    hybrid_search=_search_engine,
+                    embedding_client=_embedding_client,
+                    llm_client=_vision_client,
+                    doc_processor=_doc_processor,
+                    vision_client=_vision_client,
+                    domain_detector=_domain_detector,
+                    reranking_pipeline=_reranking_pipeline,
+                    extraction_pipeline=_extraction_pipeline,
+                    community_summarizer=_community_summarizer,
+                )
+            )
+            logger.info("Route dependencies initialized")
 
     except Exception as e:
         logger.error(f"Startup failed: {e}", exc_info=True)
@@ -115,6 +196,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Portable Knowledge Base...")
 
+    if _cross_encoder:
+        await _cross_encoder.shutdown()
+    if _embedding_client:
+        await _embedding_client.close()
     if _vision_client:
         await _vision_client.close()
     if _kuzu_store:
@@ -130,324 +215,29 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Portable Knowledge Base API",
-    description="Self-contained knowledge base with vector search, graph database, and RAG",
-    version="0.2.0",
+    description="Self-contained knowledge base with vector search, graph database, RAG, domain detection, and reranking",
+    version="0.3.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
 )
 
+# Load configuration
+_config = load_config()
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_config.cors.allow_origins,
+    allow_credentials=_config.cors.allow_credentials,
+    allow_methods=_config.cors.allow_methods,
+    allow_headers=_config.cors.allow_headers,
 )
 
-
-# ==================== Health Endpoints ====================
-
-class HealthResponse(BaseModel):
-    """Health check response."""
-    status: str
-    version: str
-    components: dict[str, bool]
-
-
-@app.get("/health", response_model=HealthResponse, tags=["health"])
-async def health_check():
-    """Health check endpoint."""
-    return HealthResponse(
-        status="healthy",
-        version="0.2.0",
-        components={
-            "sqlite": _sqlite_store is not None,
-            "chromadb": _chroma_store is not None,
-            "kuzu": _kuzu_store is not None,
-            "vision_api": _vision_client is not None,
-        }
-    )
-
-
-@app.get("/stats", tags=["health"])
-async def get_stats():
-    """Get storage statistics."""
-    stats = {}
-
-    if _sqlite_store:
-        stats["sqlite"] = await _sqlite_store.get_stats()
-    if _chroma_store:
-        stats["chromadb"] = await _chroma_store.get_stats()
-    if _kuzu_store:
-        stats["kuzu"] = await _kuzu_store.get_stats()
-
-    return stats
-
-
-# ==================== Document Endpoints ====================
-
-class DocumentCreate(BaseModel):
-    """Document creation request."""
-    name: str
-    source_uri: Optional[str] = None
-    content: Optional[str] = None
-    domain: Optional[str] = None
-    metadata: dict = {}
-
-
-class DocumentResponse(BaseModel):
-    """Document response."""
-    id: str
-    name: str
-    status: str
-    created_at: str
-
-
-@app.post("/documents", response_model=DocumentResponse, tags=["documents"])
-async def create_document(doc: DocumentCreate):
-    """Create a new document."""
-    if not _sqlite_store:
-        raise RuntimeError("Storage not initialized")
-
-    document = Document(
-        name=doc.name,
-        source_uri=doc.source_uri,
-        content=doc.content,
-        domain=doc.domain,
-        metadata=doc.metadata,
-    )
-
-    doc_id = await _sqlite_store.add_document(document)
-
-    return DocumentResponse(
-        id=doc_id,
-        name=doc.name,
-        status="pending",
-        created_at=document.created_at.isoformat(),
-    )
-
-
-@app.get("/documents", tags=["documents"])
-async def list_documents(
-    status: Optional[str] = None,
-    domain: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    """List documents."""
-    if not _sqlite_store:
-        raise RuntimeError("Storage not initialized")
-
-    docs = await _sqlite_store.list_documents(
-        status=status,
-        domain=domain,
-        limit=limit,
-        offset=offset,
-    )
-
-    return {
-        "documents": [
-            {
-                "id": d.id,
-                "name": d.name,
-                "status": d.status,
-                "domain": d.domain,
-                "created_at": d.created_at.isoformat(),
-            }
-            for d in docs
-        ],
-        "count": len(docs),
-    }
-
-
-@app.get("/documents/{document_id}", tags=["documents"])
-async def get_document(document_id: str):
-    """Get a document by ID."""
-    if not _sqlite_store:
-        raise RuntimeError("Storage not initialized")
-
-    doc = await _sqlite_store.get_document(document_id)
-    if not doc:
-        return {"error": "Document not found"}
-
-    return {
-        "id": doc.id,
-        "name": doc.name,
-        "source_uri": doc.source_uri,
-        "content": doc.content,
-        "status": doc.status,
-        "domain": doc.domain,
-        "metadata": doc.metadata,
-        "created_at": doc.created_at.isoformat(),
-    }
-
-
-# ==================== Search Endpoints ====================
-
-class SearchRequest(BaseModel):
-    """Search request."""
-    query: str
-    limit: int = 10
-
-
-class SearchResult(BaseModel):
-    """Search result."""
-    chunk_id: str
-    document_id: str
-    text: str
-    score: float
-    document_name: Optional[str] = None
-
-
-@app.post("/search", tags=["search"])
-async def search(request: SearchRequest):
-    """Search for documents."""
-    if not _search_engine:
-        raise RuntimeError("Search engine not initialized")
-
-    results = await _search_engine.search(
-        query=request.query,
-        limit=request.limit,
-    )
-
-    return {
-        "results": [
-            {
-                "chunk_id": r.chunk_id,
-                "document_id": r.document_id,
-                "text": r.text[:500] + "..." if len(r.text) > 500 else r.text,
-                "score": r.score,
-                "document_name": r.document_name,
-            }
-            for r in results
-        ],
-        "query": request.query,
-        "count": len(results),
-    }
-
-
-# ==================== Ingestion Endpoints ====================
-
-class IngestRequest(BaseModel):
-    """Ingestion request."""
-    file_path: str
-    domain: Optional[str] = None
-
-
-class IngestResponse(BaseModel):
-    """Ingestion response."""
-    document_id: str
-    name: str
-    status: str
-    chunk_count: int
-
-
-@app.post("/ingest", response_model=IngestResponse, tags=["ingestion"])
-async def ingest_document(request: IngestRequest):
-    """Ingest a document from file path."""
-    if not _doc_processor or not _sqlite_store:
-        raise RuntimeError("Document processor not initialized")
-
-    path = Path(request.file_path)
-    if not path.exists():
-        return {"error": f"File not found: {request.file_path}"}
-
-    # Process document
-    processed = await _doc_processor.process(path)
-
-    # Create document in store
-    document = Document(
-        name=processed.name,
-        source_uri=processed.source_path,
-        content=processed.content,
-        domain=request.domain,
-        metadata=processed.metadata,
-        status="processed",
-    )
-
-    doc_id = await _sqlite_store.add_document(document)
-
-    # Chunk document
-    chunker = SemanticChunker()
-    chunks = chunker.chunk(processed.content, doc_id)
-
-    # Store chunks
-    chunk_ids = await _sqlite_store.add_chunks_batch(chunks)
-
-    return IngestResponse(
-        document_id=doc_id,
-        name=processed.name,
-        status="processed",
-        chunk_count=len(chunk_ids),
-    )
-
-
-# ==================== Graph Endpoints ====================
-
-@app.get("/graph/entities", tags=["graph"])
-async def list_entities(
-    name: Optional[str] = None,
-    entity_type: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=1000),
-):
-    """List entities from knowledge graph."""
-    if not _kuzu_store:
-        raise RuntimeError("Graph store not initialized")
-
-    entities = await _kuzu_store.search_entities(
-        name=name,
-        entity_type=entity_type,
-        limit=limit,
-    )
-
-    return {
-        "entities": [
-            {
-                "id": e.id,
-                "name": e.name,
-                "type": e.entity_type,
-                "description": e.description,
-                "domain": e.domain,
-            }
-            for e in entities
-        ],
-        "count": len(entities),
-    }
-
-
-@app.get("/graph/entities/{entity_id}", tags=["graph"])
-async def get_entity(entity_id: str):
-    """Get an entity and its relationships."""
-    if not _kuzu_store:
-        raise RuntimeError("Graph store not initialized")
-
-    entity = await _kuzu_store.get_entity(entity_id)
-    if not entity:
-        return {"error": "Entity not found"}
-
-    relationships = await _kuzu_store.get_entity_relationships(entity_id)
-
-    return {
-        "entity": {
-            "id": entity.id,
-            "name": entity.name,
-            "type": entity.entity_type,
-            "description": entity.description,
-            "domain": entity.domain,
-        },
-        "relationships": relationships,
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "main:app",
-        host="localhost",
-        port=8765,
-        reload=True,
-        log_config=None,
-    )
+# Register route modules
+app.include_router(health_router)
+app.include_router(documents_router)
+app.include_router(search_router)
+app.include_router(ingestion_router)
+app.include_router(domain_router)
+app.include_router(graph_router)
